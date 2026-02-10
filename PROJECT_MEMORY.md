@@ -23,6 +23,10 @@
 
 - 2026-02-10 | Switch lookup sources from `api.bgpview.io` (DNS failure) to RouteViews + RIPEstat | Restore a working V1 and improve timestamped evidence fields | `curl https://api.bgpview.io/ip/8.8.8.8` failed to resolve; local smoke `curl http://localhost:3000/api/bgp/lookup?q=8.8.8.8` returned evidence URLs/timestamps | c282510 | high | trusted
 - 2026-02-10 | Add `npm run typecheck` + Vitest unit tests for parsing/normalization | Prevent regressions in query parsing and avoid shipping broken lookup routing | `npm run typecheck`, `npm test` | fadcf35 | high | trusted
+- 2026-02-10 | Add GitHub Actions CI workflow for `lint`/`typecheck`/`test`/`build` | Catch regressions on pushes and make CI signals visible | `gh run watch` for workflow `ci` completed successfully | b4dafe7 | high | trusted
+- 2026-02-10 | Add bounded upstream fetch cache (TTL) and surface cache hits in evidence | Reduce accidental upstream load while keeping timestamps explicit | Local smoke: two consecutive `curl http://localhost:3011/api/bgp/lookup?q=8.8.8.8` responses showed `sources[].cached: true` on the second call | 2cf2cc2 | medium | trusted
+- 2026-02-10 | Add query history + copy/download JSON export | Improve UX and make exporting timestamped evidence a one-click action | `npm run build` succeeded; UI updates in `src/app/bgp/ui.tsx` | aa9fc7e | high | trusted
+- 2026-02-10 | Improve IP normalization to accept bracketed IPv6 with port | Make pasted inputs like `[2001:db8::1]:443` work | `npm test` added coverage for this case | 7e06d46 | high | trusted
 
 ## Mistakes And Fixes
 - Template: YYYY-MM-DD | Issue | Root cause | Fix | Prevention rule | Commit | Confidence
@@ -49,5 +53,8 @@
 - 2026-02-10 | `npm run typecheck` | tsc exit 0 | pass
 - 2026-02-10 | `npm test` | vitest: 11 tests passed | pass
 - 2026-02-10 | `npm run dev -- --port 3000` + `curl http://localhost:3000/api/bgp/lookup?q=8.8.8.8` | JSON with RouteViews/RIPEstat evidence URLs and timestamps | pass
+- 2026-02-10 | `npm run lint && npm run typecheck && npm test && npm run build` | all commands exit 0; vitest 12 tests passed | pass
+- 2026-02-10 | `npm run dev -- --port 3011` + `curl http://localhost:3011/api/bgp/lookup?q=8.8.8.8` (twice) | second response contained `sources[].cached: true` | pass
+- 2026-02-10 | `gh run watch 21865523458 --exit-status` | CI workflow completed successfully | pass
 ## Historical Summary
 - Keep compact summaries of older entries here when file compaction runs.
