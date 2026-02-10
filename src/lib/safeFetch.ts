@@ -1,6 +1,6 @@
 export type SafeFetchResult<T> =
-  | { ok: true; value: T; fetchedAt: string }
-  | { ok: false; error: string; fetchedAt: string };
+  | { ok: true; value: T; fetchedAt: string; url: string; status: number }
+  | { ok: false; error: string; fetchedAt: string; url: string; status?: number };
 
 export async function safeJsonFetch<T>(
   url: string,
@@ -21,16 +21,16 @@ export async function safeJsonFetch<T>(
       credentials: "omit",
       cache: "no-store",
     });
+    const status = res.status;
     if (!res.ok) {
-      return { ok: false, error: `HTTP ${res.status}`, fetchedAt };
+      return { ok: false, error: `HTTP ${status}`, fetchedAt, url, status };
     }
     const json = (await res.json()) as T;
-    return { ok: true, value: json, fetchedAt };
+    return { ok: true, value: json, fetchedAt, url, status };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return { ok: false, error: msg, fetchedAt };
+    return { ok: false, error: msg, fetchedAt, url };
   } finally {
     clearTimeout(t);
   }
 }
-
