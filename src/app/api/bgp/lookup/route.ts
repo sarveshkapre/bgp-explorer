@@ -11,6 +11,8 @@ type SourceEvidence = {
   status?: number;
   ok: boolean;
   upstreamTime?: string;
+  cached?: boolean;
+  cacheAgeMs?: number;
   error?: string;
 };
 
@@ -30,6 +32,14 @@ function ripeSearchCompleteUrl(resource: string): string {
   return `https://stat.ripe.net/data/searchcomplete/data.json?resource=${encodeURIComponent(resource)}`;
 }
 
+function cacheTtlMs(): number {
+  const raw = process.env.BGP_CACHE_TTL_MS;
+  if (raw === undefined) return 30_000;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.floor(n);
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const raw = (searchParams.get("q") ?? "").trim();
@@ -39,6 +49,7 @@ export async function GET(req: NextRequest) {
 
   const sources: SourceEvidence[] = [];
   const startedAt = new Date().toISOString();
+  const ttlMs = cacheTtlMs();
 
   const parsed = parseBgpQuery(raw);
   const ip = parsed.kind === "ip" ? parsed.ip ?? null : null;
@@ -46,7 +57,7 @@ export async function GET(req: NextRequest) {
   const asn = parsed.kind === "asn" ? parsed.asn ?? null : null;
 
   if (parsed.kind === "ip" && ip) {
-    const netRes = await safeJsonFetch<JsonRecord>(ripeNetworkInfoUrl(ip), { timeoutMs: 8000 });
+    const netRes = await safeJsonFetch<JsonRecord>(ripeNetworkInfoUrl(ip), { timeoutMs: 8000, cacheTtlMs: ttlMs });
     sources.push({
       name: "ripestat",
       url: netRes.url,
@@ -54,6 +65,8 @@ export async function GET(req: NextRequest) {
       status: netRes.status,
       ok: netRes.ok,
       upstreamTime: netRes.ok ? String(netRes.value["time"] ?? "") : undefined,
+      cached: netRes.cached,
+      cacheAgeMs: netRes.cacheAgeMs,
       error: netRes.ok ? undefined : netRes.error,
     });
     if (!netRes.ok) {
@@ -77,7 +90,10 @@ export async function GET(req: NextRequest) {
     let prefixInfo: unknown = null;
     let partial = false;
     if (coveringPrefix) {
-      const prefRes = await safeJsonFetch<unknown>(routeViewsPrefixUrl(coveringPrefix), { timeoutMs: 8000 });
+      const prefRes = await safeJsonFetch<unknown>(routeViewsPrefixUrl(coveringPrefix), {
+        timeoutMs: 8000,
+        cacheTtlMs: ttlMs,
+      });
       sources.push({
         name: "routeviews",
         url: prefRes.url,
@@ -85,6 +101,8 @@ export async function GET(req: NextRequest) {
         status: prefRes.status,
         ok: prefRes.ok,
         upstreamTime: prefRes.ok ? latestPeerTimestamp(prefRes.value) : undefined,
+        cached: prefRes.cached,
+        cacheAgeMs: prefRes.cacheAgeMs,
         error: prefRes.ok ? undefined : prefRes.error,
       });
       if (prefRes.ok) {
@@ -118,7 +136,7 @@ export async function GET(req: NextRequest) {
   }
 
   if (parsed.kind === "prefix" && prefix) {
-    const prefRes = await safeJsonFetch<unknown>(routeViewsPrefixUrl(prefix), { timeoutMs: 8000 });
+    const prefRes = await safeJsonFetch<unknown>(routeViewsPrefixUrl(prefix), { timeoutMs: 8000, cacheTtlMs: ttlMs });
     sources.push({
       name: "routeviews",
       url: prefRes.url,
@@ -126,6 +144,8 @@ export async function GET(req: NextRequest) {
       status: prefRes.status,
       ok: prefRes.ok,
       upstreamTime: prefRes.ok ? latestPeerTimestamp(prefRes.value) : undefined,
+      cached: prefRes.cached,
+      cacheAgeMs: prefRes.cacheAgeMs,
       error: prefRes.ok ? undefined : prefRes.error,
     });
     if (!prefRes.ok) {
@@ -160,13 +180,15 @@ export async function GET(req: NextRequest) {
   }
 
   if (parsed.kind === "asn" && asn) {
-    const asnRes = await safeJsonFetch<unknown>(routeViewsAsnUrl(asn), { timeoutMs: 8000 });
+    const asnRes = await safeJsonFetch<unknown>(routeViewsAsnUrl(asn), { timeoutMs: 8000, cacheTtlMs: ttlMs });
     sources.push({
       name: "routeviews",
       url: asnRes.url,
       fetchedAt: asnRes.fetchedAt,
       status: asnRes.status,
       ok: asnRes.ok,
+      cached: asnRes.cached,
+      cacheAgeMs: asnRes.cacheAgeMs,
       error: asnRes.ok ? undefined : asnRes.error,
     });
     if (!asnRes.ok) {
@@ -205,7 +227,7 @@ export async function GET(req: NextRequest) {
   }
 
   // Fallback: try search completion for org-name / ambiguous queries.
-  const searchRes = await safeJsonFetch<JsonRecord>(ripeSearchCompleteUrl(raw), { timeoutMs: 8000 });
+  const searchRes = await safeJsonFetch<JsonRecord>(ripeSearchCompleteUrl(raw), { timeoutMs: 8000, cacheTtlMs: ttlMs });
   sources.push({
     name: "ripestat",
     url: searchRes.url,
@@ -213,6 +235,8 @@ export async function GET(req: NextRequest) {
     status: searchRes.status,
     ok: searchRes.ok,
     upstreamTime: searchRes.ok ? String(searchRes.value["time"] ?? "") : undefined,
+    cached: searchRes.cached,
+    cacheAgeMs: searchRes.cacheAgeMs,
     error: searchRes.ok ? undefined : searchRes.error,
   });
   if (!searchRes.ok) {

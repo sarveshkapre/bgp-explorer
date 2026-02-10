@@ -28,6 +28,13 @@ function get(v: unknown, path: string[]): unknown {
   return cur;
 }
 
+function formatAge(ms: number | undefined) {
+  if (!ms || !Number.isFinite(ms) || ms < 0) return "";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  return `${Math.round(ms / 60_000)}m`;
+}
+
 export default function BgpClient() {
   const router = useRouter();
   const pathname = usePathname();
@@ -140,7 +147,10 @@ export default function BgpClient() {
                     <div className="break-all font-mono text-[11px] leading-4 text-white/70">{s.url}</div>
                     <div className="flex items-center justify-between gap-3 font-mono text-[11px] text-white/55">
                       <div>fetchedAt: {s.fetchedAt}</div>
-                      {s.upstreamTime ? <div>upstream: {s.upstreamTime}</div> : null}
+                      <div className="flex items-center gap-3">
+                        {s.cached ? <div>cached: {formatAge(s.cacheAgeMs) || "hit"}</div> : null}
+                        {s.upstreamTime ? <div>upstream: {s.upstreamTime}</div> : null}
+                      </div>
                     </div>
                   </div>
                 ))
@@ -260,6 +270,8 @@ function summarizeLookup(data: LookupResponse | null) {
           status: typeof s["status"] === "number" ? s["status"] : Number(s["status"] ?? NaN),
           ok: Boolean(s["ok"]),
           upstreamTime: String(s["upstreamTime"] ?? "") || undefined,
+          cached: Boolean(s["cached"] ?? false),
+          cacheAgeMs: typeof s["cacheAgeMs"] === "number" ? s["cacheAgeMs"] : Number(s["cacheAgeMs"] ?? NaN),
         }))
     : [];
 
@@ -325,4 +337,3 @@ function routeViewsReportingPeersCount(v: unknown): number | null {
   if (!Array.isArray(peers)) return null;
   return peers.length;
 }
-
