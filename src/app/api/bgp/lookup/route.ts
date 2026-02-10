@@ -1,13 +1,8 @@
 import { NextRequest } from "next/server";
-import { normalizeIp } from "@/lib/ip";
-import { normalizePrefix } from "@/lib/prefix";
+import { parseBgpQuery } from "@/lib/bgpQuery";
 import { safeJsonFetch } from "@/lib/safeFetch";
 
 type JsonRecord = Record<string, unknown>;
-
-function isAsn(q: string): boolean {
-  return /^[0-9]{1,10}$/.test(q);
-}
 
 type SourceEvidence = {
   name: "routeviews" | "ripestat";
@@ -42,16 +37,15 @@ export async function GET(req: NextRequest) {
     return Response.json({ error: "missing query parameter q" }, { status: 400 });
   }
 
-  const q = raw.replace(/^AS\s*/i, "");
-
   const sources: SourceEvidence[] = [];
   const startedAt = new Date().toISOString();
 
-  const ip = normalizeIp(q);
-  const prefix = normalizePrefix(q);
-  const asn = isAsn(q) ? q : null;
+  const parsed = parseBgpQuery(raw);
+  const ip = parsed.kind === "ip" ? parsed.ip ?? null : null;
+  const prefix = parsed.kind === "prefix" ? parsed.prefix ?? null : null;
+  const asn = parsed.kind === "asn" ? parsed.asn ?? null : null;
 
-  if (ip) {
+  if (parsed.kind === "ip" && ip) {
     const netRes = await safeJsonFetch<JsonRecord>(ripeNetworkInfoUrl(ip), { timeoutMs: 8000 });
     sources.push({
       name: "ripestat",
@@ -123,7 +117,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  if (prefix) {
+  if (parsed.kind === "prefix" && prefix) {
     const prefRes = await safeJsonFetch<unknown>(routeViewsPrefixUrl(prefix), { timeoutMs: 8000 });
     sources.push({
       name: "routeviews",
@@ -165,7 +159,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  if (asn) {
+  if (parsed.kind === "asn" && asn) {
     const asnRes = await safeJsonFetch<unknown>(routeViewsAsnUrl(asn), { timeoutMs: 8000 });
     sources.push({
       name: "routeviews",
