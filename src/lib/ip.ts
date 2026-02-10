@@ -21,8 +21,17 @@ export function normalizeIp(input: string | null | undefined): string | null {
   if (!s) return null;
   // x-forwarded-for may contain a chain: "client, proxy1, proxy2"
   if (s.includes(",")) s = s.split(",")[0]?.trim() ?? s;
-  // Strip IPv6 brackets: "[::1]" or "[2001:db8::1]"
-  if (s.startsWith("[") && s.endsWith("]")) s = s.slice(1, -1);
+  // Strip IPv6 brackets (and optional port): "[::1]" or "[2001:db8::1]:443"
+  if (s.startsWith("[")) {
+    const end = s.indexOf("]");
+    if (end > 0) {
+      const inside = s.slice(1, end);
+      const rest = s.slice(end + 1);
+      if (rest === "" || /^:\d{1,5}$/.test(rest)) {
+        s = inside;
+      }
+    }
+  }
   // Strip port: "1.2.3.4:1234"
   if (s.includes(":") && isIPv4(s.split(":")[0] ?? "")) {
     s = s.split(":")[0] ?? s;
@@ -36,4 +45,3 @@ export function ipVersion(ip: string): "ipv4" | "ipv6" | "unknown" {
   if (isIPv6(ip)) return "ipv6";
   return "unknown";
 }
-
