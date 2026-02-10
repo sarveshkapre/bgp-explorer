@@ -26,6 +26,7 @@ Scoring lens: impact, effort, strategic fit, differentiation, risk, confidence.
 - 2026-02-10: Fix broken navigation/branding and add `/bgp` route; `/` redirects to `/bgp`. Evidence: `src/app/layout.tsx`, `src/app/page.tsx`, `src/app/bgp/page.tsx`, `src/app/bgp/ui.tsx`. (commit: `c282510`)
 - 2026-02-10: Add org-name suggestion flow using RIPEstat search completion and shareable `?q=` lookups. Evidence: `src/app/bgp/ui.tsx`, `src/app/api/bgp/lookup/route.ts`. (commit: `c282510`)
 - 2026-02-10: Add `npm run typecheck` and Vitest unit tests for parsing/normalization. Evidence: `vitest.config.ts`, `src/lib/*.test.ts`, `src/lib/bgpQuery.ts`. (commit: `fadcf35`)
+- 2026-02-10: Refactor: de-duplicate JSON traversal and RouteViews evidence parsing helpers; add unit tests. Evidence: `src/lib/json.ts`, `src/lib/routeViews.ts`, `npm test`. (commit: `(pending)`)
 
 ## Insights
 

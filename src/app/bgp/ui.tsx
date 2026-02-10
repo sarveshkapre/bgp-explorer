@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { asRecord, getPath } from "@/lib/json";
+import { routeViewsOriginAsn, routeViewsReportingPeersCount, routeViewsRPKIState } from "@/lib/routeViews";
 
 type LookupResponse = Record<string, unknown>;
 
@@ -15,21 +17,7 @@ function prettyJson(v: unknown) {
 
 const HISTORY_KEY = "bgpExplorer.history.v1";
 const HISTORY_MAX = 12;
-
-function asRecord(v: unknown): Record<string, unknown> | null {
-  if (!v || typeof v !== "object") return null;
-  return v as Record<string, unknown>;
-}
-
-function get(v: unknown, path: string[]): unknown {
-  let cur: unknown = v;
-  for (const p of path) {
-    const r = asRecord(cur);
-    if (!r) return undefined;
-    cur = r[p];
-  }
-  return cur;
-}
+const get = getPath;
 
 function formatAge(ms: number | undefined) {
   if (!ms || !Number.isFinite(ms) || ms < 0) return "";
@@ -457,31 +445,4 @@ function extractSuggestions(data: LookupResponse | null) {
   return out.slice(0, 20);
 }
 
-function routeViewsFirstEntry(v: unknown): Record<string, unknown> | null {
-  if (!Array.isArray(v) || v.length < 1) return null;
-  return asRecord(v[0]);
-}
-
-function routeViewsOriginAsn(v: unknown): string | null {
-  const r = routeViewsFirstEntry(v);
-  if (!r) return null;
-  const o = r["origin_asn"];
-  if (typeof o === "number" || typeof o === "string") return String(o);
-  return null;
-}
-
-function routeViewsRPKIState(v: unknown): string | null {
-  const r = routeViewsFirstEntry(v);
-  if (!r) return null;
-  const s = r["rpki_state"];
-  if (typeof s === "string" && s) return s;
-  return null;
-}
-
-function routeViewsReportingPeersCount(v: unknown): number | null {
-  const r = routeViewsFirstEntry(v);
-  if (!r) return null;
-  const peers = r["reporting_peers"];
-  if (!Array.isArray(peers)) return null;
-  return peers.length;
-}
+// No UI-only RouteViews helpers are currently needed beyond `src/lib/routeViews.ts`.

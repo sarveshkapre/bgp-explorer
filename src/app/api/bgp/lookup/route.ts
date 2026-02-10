@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
 import { parseBgpQuery } from "@/lib/bgpQuery";
+import { getPath } from "@/lib/json";
+import { routeViewsLatestPeerTimestamp } from "@/lib/routeViews";
 import { safeJsonFetch } from "@/lib/safeFetch";
 
 type JsonRecord = Record<string, unknown>;
@@ -100,7 +102,7 @@ export async function GET(req: NextRequest) {
         fetchedAt: prefRes.fetchedAt,
         status: prefRes.status,
         ok: prefRes.ok,
-        upstreamTime: prefRes.ok ? latestPeerTimestamp(prefRes.value) : undefined,
+        upstreamTime: prefRes.ok ? routeViewsLatestPeerTimestamp(prefRes.value) : undefined,
         cached: prefRes.cached,
         cacheAgeMs: prefRes.cacheAgeMs,
         error: prefRes.ok ? undefined : prefRes.error,
@@ -143,7 +145,7 @@ export async function GET(req: NextRequest) {
       fetchedAt: prefRes.fetchedAt,
       status: prefRes.status,
       ok: prefRes.ok,
-      upstreamTime: prefRes.ok ? latestPeerTimestamp(prefRes.value) : undefined,
+      upstreamTime: prefRes.ok ? routeViewsLatestPeerTimestamp(prefRes.value) : undefined,
       cached: prefRes.cached,
       cacheAgeMs: prefRes.cacheAgeMs,
       error: prefRes.ok ? undefined : prefRes.error,
@@ -268,32 +270,4 @@ export async function GET(req: NextRequest) {
   });
 }
 
-function asRecord(v: unknown): Record<string, unknown> | null {
-  if (!v || typeof v !== "object") return null;
-  return v as Record<string, unknown>;
-}
-
-function get(v: unknown, path: string[]): unknown {
-  let cur: unknown = v;
-  for (const p of path) {
-    const r = asRecord(cur);
-    if (!r) return undefined;
-    cur = r[p];
-  }
-  return cur;
-}
-
-function latestPeerTimestamp(prefixInfo: unknown): string | undefined {
-  // RouteViews prefix payload is typically an array with one object containing `reporting_peers[] {timestamp}`.
-  if (!Array.isArray(prefixInfo) || prefixInfo.length === 0) return undefined;
-  const first = asRecord(prefixInfo[0]);
-  const peers = first ? first["reporting_peers"] : undefined;
-  if (!Array.isArray(peers)) return undefined;
-  let best = "";
-  for (const p of peers) {
-    const r = asRecord(p);
-    const ts = r ? String(r["timestamp"] ?? "") : "";
-    if (ts && ts > best) best = ts;
-  }
-  return best || undefined;
-}
+const get = getPath;
