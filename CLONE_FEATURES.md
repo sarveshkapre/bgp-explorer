@@ -10,11 +10,15 @@
 
 Scoring lens: impact, effort, strategic fit, differentiation, risk, confidence.
 
+- [x] Add GitHub Actions CI workflow to run `lint`, `typecheck`, `test`, and `build` on pushes/PRs. (impact: high, effort: low, fit: high, diff: low, risk: low, confidence: high)
+- [x] Add bounded server-side fetch cache (TTL) and surface cache hits in evidence to reduce upstream load while keeping timestamps explicit. (impact: medium, effort: medium, fit: medium, diff: low, risk: low, confidence: medium)
+- [x] Add UX affordances: example chips, local query history, and copy/download buttons for raw JSON evidence export. (impact: high, effort: medium, fit: high, diff: medium, risk: low, confidence: high)
+- [x] Improve IP normalization (support bracketed IPv6 with port, e.g. `[2001:db8::1]:443`) and add tests. (impact: low, effort: low, fit: medium, diff: low, risk: low, confidence: high)
 - [ ] Add entity pages (`/asn/:asn`, `/prefix/:prefix`) with relationships and evidence (origins, peers, RPKI posture, reporting peers). (impact: high, effort: high, fit: high, diff: medium, risk: medium, confidence: medium)
 - [ ] Add evidence capture to storage (persist results keyed by query+timestamp) and an “evidence permalink”. (impact: high, effort: high, fit: high, diff: high, risk: medium, confidence: low)
 - [ ] Add time-travel UI primitives (compare two timestamps, diff summary) once we have stored snapshots. (impact: high, effort: high, fit: high, diff: high, risk: medium, confidence: low)
-- [ ] Add input affordances: example chips, query history, and a “copy evidence” button (stable JSON export). (impact: medium, effort: medium, fit: high, diff: medium, risk: low, confidence: medium)
-- [ ] Add a small server-side cache with bounded TTL to reduce upstream load while keeping “evidence timestamps” clear. (impact: medium, effort: medium, fit: medium, diff: low, risk: low, confidence: medium)
+- [ ] Add abuse protection: simple per-IP rate limiting (best-effort) for `/api/bgp/lookup` to reduce accidental upstream overload. (impact: medium, effort: medium, fit: medium, diff: low, risk: low, confidence: medium)
+- [ ] Add structured rendering for ASN/prefix results (tables + top relationships) so users don’t have to parse raw JSON. (impact: medium, effort: medium, fit: high, diff: medium, risk: low, confidence: medium)
 
 ## Implemented
 
