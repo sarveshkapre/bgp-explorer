@@ -37,5 +37,11 @@ Market scan (bounded) sources and baseline expectations:
 - RIPEstat provides a public Data API suitable for IP-to-covering-prefix and “searchcomplete” style disambiguation; responses include a server-side `time` field. https://stat.ripe.net/docs/data_api
 - `PeeringDB`: optional enrichment source for IXP/facility/org metadata once entity pages exist. https://www.peeringdb.com/
 
+Gap map (as of 2026-02-10):
+- Missing: dedicated entity pages (ASN/prefix), evidence permalinks/snapshots, time-travel/diff, anomaly detection, richer enrichment (PeeringDB/WHOIS/RDAP).
+- Weak: structured presentation of upstream data (tables/graphs), abuse protection/rate limiting, deeper disambiguation for org searches.
+- Parity: single search box, actionable suggestions, raw JSON access, upstream evidence URLs/timestamps.
+- Differentiator opportunities: first-class evidence capture (permalinks + export), “changes over time” UX once snapshots exist.
+
 ## Notes
 - This file is maintained by the autonomous clone loop.
