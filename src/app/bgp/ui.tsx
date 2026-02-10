@@ -13,6 +13,9 @@ function prettyJson(v: unknown) {
   }
 }
 
+const HISTORY_KEY = "bgpExplorer.history.v1";
+const HISTORY_MAX = 12;
+
 function asRecord(v: unknown): Record<string, unknown> | null {
   if (!v || typeof v !== "object") return null;
   return v as Record<string, unknown>;
@@ -35,6 +38,39 @@ function formatAge(ms: number | undefined) {
   return `${Math.round(ms / 60_000)}m`;
 }
 
+function loadHistory(): string[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(String).map((s) => s.trim()).filter(Boolean).slice(0, HISTORY_MAX);
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(list: string[]) {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, HISTORY_MAX)));
+  } catch {
+    // ignore (storage may be disabled)
+  }
+}
+
+function addToHistory(prev: string[], q: string): string[] {
+  const next = [q, ...prev.filter((x) => x !== q)];
+  return next.slice(0, HISTORY_MAX);
+}
+
+function safeFilename(s: string): string {
+  return s
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-zA-Z0-9._-]/g, "_")
+    .slice(0, 120);
+}
+
 export default function BgpClient() {
   const router = useRouter();
   const pathname = usePathname();
@@ -45,8 +81,14 @@ export default function BgpClient() {
   const [data, setData] = useState<LookupResponse | null>(null);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState<string[]>([]);
+  const [copied, setCopied] = useState<"" | "json" | "link">("");
 
   const didAutoRun = useRef(false);
+
+  useEffect(() => {
+    setHistory(loadHistory());
+  }, []);
 
   const run = async (nextQ?: string) => {
     const query = (nextQ ?? q).trim();
@@ -65,6 +107,12 @@ export default function BgpClient() {
       const sp = new URLSearchParams(searchParams.toString());
       sp.set("q", query);
       router.replace(`${pathname}?${sp.toString()}`, { scroll: false });
+
+      setHistory((prev) => {
+        const next = addToHistory(prev, query);
+        saveHistory(next);
+        return next;
+      });
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -83,6 +131,7 @@ export default function BgpClient() {
 
   const summary = useMemo(() => summarizeLookup(data), [data]);
   const suggestions = useMemo(() => extractSuggestions(data), [data]);
+  const examples = useMemo(() => ["8.8.8.8", "8.8.8.0/24", "AS15169", "cloudflare", "google"], []);
 
   return (
     <div className="grid gap-6">
@@ -116,6 +165,49 @@ export default function BgpClient() {
         {err ? (
           <div className="mt-3 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">
             {err}
+          </div>
+        ) : null}
+
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-white/60">
+          <div className="mr-1">Examples:</div>
+          {examples.map((ex) => (
+            <button
+              key={ex}
+              className="rounded-full bg-white/8 px-3 py-1 font-mono text-[11px] text-white/75 ring-1 ring-white/10 hover:bg-white/12"
+              onClick={() => {
+                setQ(ex);
+                void run(ex);
+              }}
+            >
+              {ex}
+            </button>
+          ))}
+        </div>
+
+        {history.length ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-white/60">
+            <div className="mr-1">Recent:</div>
+            {history.map((h) => (
+              <button
+                key={h}
+                className="rounded-full bg-black/25 px-3 py-1 font-mono text-[11px] text-white/70 ring-1 ring-white/10 hover:bg-black/30"
+                onClick={() => {
+                  setQ(h);
+                  void run(h);
+                }}
+              >
+                {h}
+              </button>
+            ))}
+            <button
+              className="rounded-full bg-white/5 px-3 py-1 text-[11px] text-white/60 ring-1 ring-white/10 hover:bg-white/8"
+              onClick={() => {
+                saveHistory([]);
+                setHistory([]);
+              }}
+            >
+              Clear
+            </button>
           </div>
         ) : null}
       </section>
@@ -190,7 +282,63 @@ export default function BgpClient() {
 
       {data ? (
         <section className="rounded-2xl border border-white/10 bg-white/5 p-5 ring-1 ring-white/10">
-          <div className="text-sm font-semibold text-white/90">Raw result</div>
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="text-sm font-semibold text-white/90">Raw result</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                className="rounded-full bg-white/8 px-3 py-1 text-xs text-white/75 ring-1 ring-white/10 hover:bg-white/12"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(prettyJson(data));
+                    setCopied("json");
+                    setTimeout(() => setCopied(""), 900);
+                  } catch {
+                    // ignore
+                  }
+                }}
+              >
+                Copy JSON{copied === "json" ? " (copied)" : ""}
+              </button>
+              <button
+                className="rounded-full bg-white/8 px-3 py-1 text-xs text-white/75 ring-1 ring-white/10 hover:bg-white/12"
+                onClick={() => {
+                  try {
+                    const kind = String(data["kind"] ?? "lookup");
+                    const query = String(data["query"] ?? q).trim();
+                    const fetchedAt = String(data["fetchedAt"] ?? new Date().toISOString());
+                    const filename = `bgp-${safeFilename(kind)}-${safeFilename(query)}-${safeFilename(fetchedAt)}.json`;
+                    const blob = new Blob([prettyJson(data)], { type: "application/json" });
+                    const u = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = u;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(u);
+                  } catch {
+                    // ignore
+                  }
+                }}
+              >
+                Download JSON
+              </button>
+              <button
+                className="rounded-full bg-white/8 px-3 py-1 text-xs text-white/75 ring-1 ring-white/10 hover:bg-white/12"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(window.location.href);
+                    setCopied("link");
+                    setTimeout(() => setCopied(""), 900);
+                  } catch {
+                    // ignore
+                  }
+                }}
+              >
+                Copy link{copied === "link" ? " (copied)" : ""}
+              </button>
+            </div>
+          </div>
           <pre className="mt-3 max-h-[520px] overflow-auto rounded-xl bg-black/30 p-4 text-xs leading-5 text-white/80 ring-1 ring-white/10">
             {prettyJson(data)}
           </pre>
