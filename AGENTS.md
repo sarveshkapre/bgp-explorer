@@ -9,7 +9,7 @@
 
 ## Mutable Repo Facts
 - Objective: Ship a BGP/ASN/prefix explorer with timestamped evidence. See plan.md.
-- Last updated: 2026-02-10T11:40:22Z
+- Last updated: 2026-02-10T11:53:32Z
 
 ## Verification Policy
 - Record exact verification commands and pass/fail outcomes in PROJECT_MEMORY.md.

@@ -10,18 +10,18 @@
 
 Scoring lens: impact, effort, strategic fit, differentiation, risk, confidence.
 
-- [x] Replace dead `api.bgpview.io` dependency with live sources (RouteViews + RIPEstat), and return timestamped evidence (upstream URL, upstream timestamp, local fetchedAt). (impact: high, effort: medium, fit: high, diff: medium, risk: low, confidence: high)
-- [x] Fix broken navigation and branding: ensure `/bgp` exists, remove/replace links to non-existent routes, and align metadata/title to “BGP Explorer”. (impact: high, effort: low, fit: high, diff: low, risk: low, confidence: high)
-- [x] Add “org name” search fallback using RIPEstat search completion, and render suggestions in the UI to disambiguate queries. (impact: medium, effort: medium, fit: high, diff: low, risk: low, confidence: medium)
-- [x] Make lookups shareable and reproducible: sync query to `?q=...`, auto-run when present, and keep raw evidence stable (no client-side munging). (impact: medium, effort: low, fit: high, diff: medium, risk: low, confidence: high)
-- [x] Add developer safety rails: `npm run typecheck` and minimal unit tests for parsing/routing logic; keep network calls mocked. (impact: medium, effort: medium, fit: high, diff: low, risk: low, confidence: medium)
-- [x] Add runnable local smoke path and record exact verification evidence in `PROJECT_MEMORY.md`. (impact: medium, effort: low, fit: high, diff: low, risk: low, confidence: high)
-
 - [ ] Add entity pages (`/asn/:asn`, `/prefix/:prefix`) with relationships and evidence (origins, peers, RPKI posture, reporting peers). (impact: high, effort: high, fit: high, diff: medium, risk: medium, confidence: medium)
-- [ ] Add time-travel UI primitives (compare two timestamps, diff summary) once we have stored snapshots. (impact: high, effort: high, fit: high, diff: high, risk: medium, confidence: low)
 - [ ] Add evidence capture to storage (persist results keyed by query+timestamp) and an “evidence permalink”. (impact: high, effort: high, fit: high, diff: high, risk: medium, confidence: low)
+- [ ] Add time-travel UI primitives (compare two timestamps, diff summary) once we have stored snapshots. (impact: high, effort: high, fit: high, diff: high, risk: medium, confidence: low)
+- [ ] Add input affordances: example chips, query history, and a “copy evidence” button (stable JSON export). (impact: medium, effort: medium, fit: high, diff: medium, risk: low, confidence: medium)
+- [ ] Add a small server-side cache with bounded TTL to reduce upstream load while keeping “evidence timestamps” clear. (impact: medium, effort: medium, fit: medium, diff: low, risk: low, confidence: medium)
 
 ## Implemented
+
+- 2026-02-10: Replace dead `api.bgpview.io` with RouteViews + RIPEstat, with evidence URLs and timestamps. Evidence: `src/app/api/bgp/lookup/route.ts`, `src/lib/safeFetch.ts`, smoke curl to `http://localhost:3000/api/bgp/lookup`. (commit: `c282510`)
+- 2026-02-10: Fix broken navigation/branding and add `/bgp` route; `/` redirects to `/bgp`. Evidence: `src/app/layout.tsx`, `src/app/page.tsx`, `src/app/bgp/page.tsx`, `src/app/bgp/ui.tsx`. (commit: `c282510`)
+- 2026-02-10: Add org-name suggestion flow using RIPEstat search completion and shareable `?q=` lookups. Evidence: `src/app/bgp/ui.tsx`, `src/app/api/bgp/lookup/route.ts`. (commit: `c282510`)
+- 2026-02-10: Add `npm run typecheck` and Vitest unit tests for parsing/normalization. Evidence: `vitest.config.ts`, `src/lib/*.test.ts`, `src/lib/bgpQuery.ts`. (commit: `fadcf35`)
 
 ## Insights
 
