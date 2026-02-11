@@ -21,7 +21,7 @@ BGP/ASN/prefix explorer (bgp.tools-like). This is a data product: the UI is only
 
 ## V1 implementation in this repo
 
-- Uses BGPView API via `/api/bgp/lookup` for fast lookups.
+- Uses RouteViews + RIPEstat via `/api/bgp/lookup` for fast lookups.
 - UI shows summary + raw JSON with timestamp and source.
 
 ## V2+

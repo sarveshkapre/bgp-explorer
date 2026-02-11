@@ -21,6 +21,11 @@
 ## Recent Decisions
 - Template: YYYY-MM-DD | Decision | Why | Evidence (tests/logs) | Commit | Confidence (high/medium/low) | Trust (trusted/untrusted)
 
+- 2026-02-11 | Add best-effort in-memory per-IP rate limiting for `/api/bgp/lookup` and return explicit `429` metadata | Prevent accidental upstream overload and make throttling behavior observable to users | Local smoke with `BGP_RATE_LIMIT_MAX_REQUESTS=2`: three API calls returned `200, 200, 429` and `retryAfterSec` | 853cf1d | high | trusted
+- 2026-02-11 | Add bounded fetch cache (`BGP_CACHE_MAX_ENTRIES`) with stale + LRU-style eviction | Prevent unbounded memory growth while preserving short TTL cache benefits | `npm test` includes `src/lib/safeFetch.test.ts` validating cache hit and eviction behavior | 853cf1d | high | trusted
+- 2026-02-11 | Tighten parser correctness (strict `isIP` validation and ASN range bound) | Avoid false-positive IP parsing and invalid ASN lookups | `src/lib/ip.test.ts` and `src/lib/bgpQuery.test.ts` cover `:::` and `AS4294967296` rejection | 853cf1d | high | trusted
+- 2026-02-11 | Add structured result rendering with pivot lookups for IP/prefix/ASN | Improve operator UX by surfacing key routing relationships without raw JSON parsing | `src/app/bgp/ui.tsx`, local smoke lookups for `8.8.8.8`, `8.8.8.0/24`, `AS15169` | 9019876 | high | trusted
+- 2026-02-11 | Keep market scan bounded to official docs/homepages of adjacent tools and treat findings as product signals only | Baseline competitor expectations without importing proprietary assets/code | `https://api.routeviews.org/docs`, `https://stat.ripe.net/docs/data-api/api-endpoints/network-info`, `https://bgp.tools/kb/api` | n/a | medium | untrusted
 - 2026-02-10 | Switch lookup sources from `api.bgpview.io` (DNS failure) to RouteViews + RIPEstat | Restore a working V1 and improve timestamped evidence fields | `curl https://api.bgpview.io/ip/8.8.8.8` failed to resolve; local smoke `curl http://localhost:3000/api/bgp/lookup?q=8.8.8.8` returned evidence URLs/timestamps | c282510 | high | trusted
 - 2026-02-10 | Add `npm run typecheck` + Vitest unit tests for parsing/normalization | Prevent regressions in query parsing and avoid shipping broken lookup routing | `npm run typecheck`, `npm test` | fadcf35 | high | trusted
 - 2026-02-10 | Add GitHub Actions CI workflow for `lint`/`typecheck`/`test`/`build` | Catch regressions on pushes and make CI signals visible | `gh run watch` for workflow `ci` completed successfully | b4dafe7 | high | trusted
@@ -41,9 +46,11 @@
 
 ## Next Prioritized Tasks
 
-- Entity pages (`/asn/:asn`, `/prefix/:prefix`) with relationship graphs and evidence blocks.
-- Persisted evidence permalinks (store lookup snapshots keyed by timestamp).
+- Entity pages (`/asn/:asn`, `/prefix/:prefix`) with richer relationship graphs and evidence blocks.
+- Persisted evidence permalinks (store lookup snapshots keyed by query+timestamp).
 - Time-travel / diff UX once snapshots exist.
+- API contract tests for `/api/bgp/lookup` response shapes across IP/prefix/ASN/search.
+- Fallback provider strategy + request observability (latency/error counters).
 
 ## Verification Evidence
 - Template: YYYY-MM-DD | Command | Key output | Status (pass/fail)
@@ -58,5 +65,13 @@
 - 2026-02-10 | `npm run dev -- --port 3011` + `curl http://localhost:3011/api/bgp/lookup?q=8.8.8.8` (twice) | second response contained `sources[].cached: true` | pass
 - 2026-02-10 | `gh run watch 21865523458 --exit-status` | CI workflow completed successfully | pass
 - 2026-02-10 | `npm run lint && npm run typecheck && npm test && npm run build` | eslint/tsc exit 0; vitest 18 tests passed; Next build succeeded | pass
+- 2026-02-11 | `gh issue list --limit 100 --json number,title,author,state,labels,createdAt,updatedAt` | returned `[]` (no open owner/bot issues) | pass
+- 2026-02-11 | `gh run list --limit 10 --json databaseId,displayTitle,headBranch,headSha,status,conclusion,event,createdAt,updatedAt,url` | all recent runs on `main` concluded `success` | pass
+- 2026-02-11 | `npm run lint` | eslint exit 0 | pass
+- 2026-02-11 | `npm run typecheck` | tsc exit 0 | pass
+- 2026-02-11 | `npm test` | vitest: 24 tests passed | pass
+- 2026-02-11 | `npm run build` | Next.js build succeeded; routes `/`, `/bgp`, `/api/bgp/lookup` emitted | pass
+- 2026-02-11 | `BGP_RATE_LIMIT_MAX_REQUESTS=50 npm run dev -- --port 3023` + `curl /api/bgp/lookup?q=8.8.8.8|8.8.8.0/24|AS15169` | returned `kind` values `ip/prefix/asn`, prefix and ASN fields present | pass
+- 2026-02-11 | `BGP_RATE_LIMIT_MAX_REQUESTS=2 npm run dev -- --port 3024` + 3x `curl /api/bgp/lookup?q=1.1.1.1` | HTTP sequence `200,200,429`; body included `error=rate limit exceeded` and `retryAfterSec` | pass
 ## Historical Summary
 - Keep compact summaries of older entries here when file compaction runs.
