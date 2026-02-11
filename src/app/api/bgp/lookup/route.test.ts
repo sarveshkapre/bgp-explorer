@@ -27,15 +27,19 @@ async function readJson(res: Response): Promise<JsonBody> {
 describe("/api/bgp/lookup contract", () => {
   const oldEnv = {
     cacheTtl: process.env.BGP_CACHE_TTL_MS,
+    cacheMaxEntries: process.env.BGP_CACHE_MAX_ENTRIES,
     rateMax: process.env.BGP_RATE_LIMIT_MAX_REQUESTS,
     rateWindow: process.env.BGP_RATE_LIMIT_WINDOW_MS,
+    rateMaxKeys: process.env.BGP_RATE_LIMIT_MAX_KEYS,
   };
 
   beforeEach(() => {
     __resetRateLimitState();
     process.env.BGP_CACHE_TTL_MS = "0";
+    process.env.BGP_CACHE_MAX_ENTRIES = "256";
     process.env.BGP_RATE_LIMIT_MAX_REQUESTS = "100";
     process.env.BGP_RATE_LIMIT_WINDOW_MS = "60000";
+    process.env.BGP_RATE_LIMIT_MAX_KEYS = "2000";
   });
 
   afterEach(() => {
@@ -43,10 +47,14 @@ describe("/api/bgp/lookup contract", () => {
     vi.unstubAllGlobals();
     if (oldEnv.cacheTtl === undefined) delete process.env.BGP_CACHE_TTL_MS;
     else process.env.BGP_CACHE_TTL_MS = oldEnv.cacheTtl;
+    if (oldEnv.cacheMaxEntries === undefined) delete process.env.BGP_CACHE_MAX_ENTRIES;
+    else process.env.BGP_CACHE_MAX_ENTRIES = oldEnv.cacheMaxEntries;
     if (oldEnv.rateMax === undefined) delete process.env.BGP_RATE_LIMIT_MAX_REQUESTS;
     else process.env.BGP_RATE_LIMIT_MAX_REQUESTS = oldEnv.rateMax;
     if (oldEnv.rateWindow === undefined) delete process.env.BGP_RATE_LIMIT_WINDOW_MS;
     else process.env.BGP_RATE_LIMIT_WINDOW_MS = oldEnv.rateWindow;
+    if (oldEnv.rateMaxKeys === undefined) delete process.env.BGP_RATE_LIMIT_MAX_KEYS;
+    else process.env.BGP_RATE_LIMIT_MAX_KEYS = oldEnv.rateMaxKeys;
   });
 
   it("returns ip lookup payload and observability metadata", async () => {
@@ -179,5 +187,30 @@ describe("/api/bgp/lookup contract", () => {
     expect(body["error"]).toBe("HTTP 503");
     const meta = body["meta"] as JsonBody;
     expect(meta["upstreamErrors"]).toBe(1);
+  });
+
+  it("falls back to safe defaults when numeric env config is invalid", async () => {
+    process.env.BGP_CACHE_TTL_MS = "-1";
+    process.env.BGP_CACHE_MAX_ENTRIES = "NaN";
+    process.env.BGP_RATE_LIMIT_MAX_REQUESTS = "wat";
+    process.env.BGP_RATE_LIMIT_WINDOW_MS = "0";
+    process.env.BGP_RATE_LIMIT_MAX_KEYS = "nope";
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/prefix/8.8.8.0%2F24")) {
+        return jsonResponse([{ origin_asn: 15169 }]);
+      }
+      throw new Error(`unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await GET(req("8.8.8.0/24"));
+    const body = await readJson(res);
+    const rateLimit = body["rateLimit"] as JsonBody;
+
+    expect(res.status).toBe(200);
+    expect(rateLimit["limit"]).toBe(40);
+    expect(rateLimit["windowMs"]).toBe(10_000);
   });
 });

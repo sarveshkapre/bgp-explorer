@@ -550,6 +550,7 @@ function StructuredViewPanel({
   onLookup: (query: string) => void;
 }) {
   if (view.kind === "ip") {
+    const coveringPrefixPageHref = view.coveringPrefix ? prefixEntityHref(view.coveringPrefix) : null;
     return (
       <div className="grid gap-3 text-sm text-white/75">
         <div className="font-mono text-xs text-white/65">IP: {view.ip}</div>
@@ -562,9 +563,9 @@ function StructuredViewPanel({
               >
                 Prefix: {view.coveringPrefix}
               </button>
-              {prefixEntityHref(view.coveringPrefix) ? (
+              {coveringPrefixPageHref ? (
                 <a
-                  href={prefixEntityHref(view.coveringPrefix) ?? "#"}
+                  href={coveringPrefixPageHref}
                   className="rounded-full bg-white/10 px-3 py-1 font-mono text-xs text-white/80 ring-1 ring-white/10 hover:bg-white/15"
                 >
                   Open prefix page
@@ -602,6 +603,7 @@ function StructuredViewPanel({
   }
 
   if (view.kind === "prefix") {
+    const prefixPageHref = prefixEntityHref(view.prefix);
     return (
       <div className="grid gap-4">
         <div className="grid grid-cols-2 gap-2 text-xs text-white/70 md:grid-cols-5">
@@ -635,9 +637,9 @@ function StructuredViewPanel({
           >
             Refresh prefix lookup
           </button>
-          {prefixEntityHref(view.prefix) ? (
+          {prefixPageHref ? (
             <a
-              href={prefixEntityHref(view.prefix) ?? "#"}
+              href={prefixPageHref}
               className="rounded-full bg-black/30 px-3 py-1 font-mono text-xs text-white/70 ring-1 ring-white/10 hover:bg-black/35"
             >
               Open prefix page
@@ -823,5 +825,3 @@ function extractSuggestions(data: LookupResponse | null) {
 
   return out.slice(0, 20);
 }
-
-// No UI-only RouteViews helpers are currently needed beyond `src/lib/routeViews.ts`.
