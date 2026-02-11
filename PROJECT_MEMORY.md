@@ -20,6 +20,7 @@
 ## Recent Decisions
 - Template: YYYY-MM-DD | Decision | Why | Evidence (tests/logs) | Commit | Confidence (high/medium/low) | Trust (trusted/untrusted)
 
+- 2026-02-11 | Refactor `/api/bgp/lookup` internals to de-duplicate env parsing, fetch options, and source-evidence shaping while preserving response contract | Reduce repeated logic and lower maintenance risk without behavior changes | `src/app/api/bgp/lookup/route.ts` + `src/app/api/bgp/lookup/route.test.ts` (`falls back to safe defaults when numeric env config is invalid`) + `npm run lint && npm run typecheck && npm test && npm run build` all pass | 7e801e6 | high | trusted
 - 2026-02-11 | Add canonical entity routes for ASN and prefix with locked-query lookup views | Improve shareability and operator navigation by giving ASNs/prefixes stable URLs while preserving existing evidence UI | Local smoke: `/asn/15169` and `/prefix/8.8.8.0/24` returned HTTP 200 and rendered canonical headers | a73f3b3 | high | trusted
 - 2026-02-11 | Add request-level observability metadata and response headers for `/api/bgp/lookup` | Make request tracing and latency/debug signals explicit in API and UI without external observability infra | `curl -I /api/bgp/lookup?q=8.8.8.8` showed `x-request-id` + `x-response-time-ms`; `meta` surfaced in JSON and summary panel | a73f3b3 | high | trusted
 - 2026-02-11 | Add API contract tests for lookup modes and upstream failure | Prevent response-shape drift as features evolve and lock key behavior for IP/prefix/ASN/search flows | `src/app/api/bgp/lookup/route.test.ts` added; `npm test` reported 29 passing tests | a73f3b3 | high | trusted
@@ -86,5 +87,6 @@
 - 2026-02-11 | `npm run dev -- --port 3037` + `curl -I /api/bgp/lookup?q=8.8.8.8` | response headers included `x-request-id` and `x-response-time-ms` | pass
 - 2026-02-11 | `gh run watch 21894030556 --exit-status` | CI run for commit `a73f3b3` completed successfully (`lint`, `typecheck`, `test`, `build`) | pass
 - 2026-02-11 | `gh run watch 21894074197 --exit-status` | CI run for commit `1ce4e86` completed successfully (`lint`, `typecheck`, `test`, `build`) | pass
+- 2026-02-11 | `npm run lint && npm run typecheck && npm test && npm run build` | eslint/tsc exit 0; vitest 30 tests passed; Next build succeeded with `/api/bgp/lookup`, `/asn/[asn]`, `/prefix/[addr]/[mask]` routes | pass
 ## Historical Summary
 - Keep compact summaries of older entries here when file compaction runs.

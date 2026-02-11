@@ -44,3 +44,5 @@ npm run typecheck
 npm test
 npm run build
 ```
+
+The API lookup contract is covered by tests, including invalid numeric env fallback behavior for rate-limit/cache settings.
