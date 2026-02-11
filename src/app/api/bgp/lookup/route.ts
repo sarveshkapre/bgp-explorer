@@ -84,7 +84,27 @@ function clientRateLimitKey(req: NextRequest): string {
 }
 
 export async function GET(req: NextRequest) {
-  const startedAt = new Date().toISOString();
+  const startedAtMs = Date.now();
+  const startedAt = new Date(startedAtMs).toISOString();
+  const requestId = crypto.randomUUID();
+  const sources: SourceEvidence[] = [];
+
+  function responseMeta() {
+    return {
+      requestId,
+      durationMs: Math.max(0, Date.now() - startedAtMs),
+      upstreamErrors: sources.filter((s) => !s.ok).length,
+      cacheHits: sources.filter((s) => Boolean(s.cached)).length,
+    };
+  }
+
+  function jsonResponse(payload: Record<string, unknown>, init?: ResponseInit) {
+    const headers = new Headers(init?.headers);
+    headers.set("X-Request-Id", requestId);
+    headers.set("X-Response-Time-Ms", String(Math.max(0, Date.now() - startedAtMs)));
+    return Response.json({ ...payload, meta: responseMeta() }, { ...init, headers });
+  }
+
   const rateLimit = consumeRateLimit(clientRateLimitKey(req), {
     windowMs: rateLimitWindowMs(),
     maxRequests: rateLimitMaxRequests(),
@@ -95,7 +115,7 @@ export async function GET(req: NextRequest) {
     if (rateLimit.retryAfterSec) {
       headers.set("Retry-After", String(rateLimit.retryAfterSec));
     }
-    return Response.json(
+    return jsonResponse(
       {
         error: "rate limit exceeded",
         hint: "Please retry shortly; lookup requests are rate-limited to protect upstream data providers.",
@@ -110,10 +130,17 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const raw = (searchParams.get("q") ?? "").trim();
   if (!raw) {
-    return Response.json({ error: "missing query parameter q", rateLimit }, { status: 400 });
+    return jsonResponse(
+      {
+        error: "missing query parameter q",
+        fetchedAt: startedAt,
+        trust: "trusted",
+        rateLimit,
+      },
+      { status: 400 },
+    );
   }
 
-  const sources: SourceEvidence[] = [];
   const ttlMs = cacheTtlMs();
   const maxEntries = cacheMaxEntries();
 
@@ -140,7 +167,7 @@ export async function GET(req: NextRequest) {
       error: netRes.ok ? undefined : netRes.error,
     });
     if (!netRes.ok) {
-      return Response.json(
+      return jsonResponse(
         {
           kind: "ip",
           query: raw,
@@ -186,7 +213,7 @@ export async function GET(req: NextRequest) {
       partial = true;
     }
 
-    return Response.json({
+    return jsonResponse({
       kind: "ip",
       query: raw,
       fetchedAt: startedAt,
@@ -226,7 +253,7 @@ export async function GET(req: NextRequest) {
       error: prefRes.ok ? undefined : prefRes.error,
     });
     if (!prefRes.ok) {
-      return Response.json(
+      return jsonResponse(
         {
           kind: "prefix",
           query: raw,
@@ -240,7 +267,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    return Response.json({
+    return jsonResponse({
       kind: "prefix",
       query: raw,
       fetchedAt: startedAt,
@@ -275,7 +302,7 @@ export async function GET(req: NextRequest) {
       error: asnRes.ok ? undefined : asnRes.error,
     });
     if (!asnRes.ok) {
-      return Response.json(
+      return jsonResponse(
         {
           kind: "asn",
           query: raw,
@@ -291,7 +318,7 @@ export async function GET(req: NextRequest) {
 
     const prefixes = Array.isArray(asnRes.value) ? asnRes.value.map(String).filter(Boolean) : [];
 
-    return Response.json({
+    return jsonResponse({
       kind: "asn",
       query: raw,
       fetchedAt: startedAt,
@@ -329,7 +356,7 @@ export async function GET(req: NextRequest) {
     error: searchRes.ok ? undefined : searchRes.error,
   });
   if (!searchRes.ok) {
-    return Response.json(
+    return jsonResponse(
       {
         error: "unrecognized query",
         hint: "Try an IP (8.8.8.8), prefix (8.8.8.0/24), ASN (15169), or an org name (google).",
@@ -342,7 +369,7 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  return Response.json({
+  return jsonResponse({
     kind: "search",
     query: raw,
     fetchedAt: startedAt,

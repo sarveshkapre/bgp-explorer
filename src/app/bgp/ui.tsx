@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { asRecord, getPath } from "@/lib/json";
 import { routeViewsOriginAsn, routeViewsReportingPeersCount, routeViewsRPKIState } from "@/lib/routeViews";
@@ -52,6 +52,14 @@ function prettyJson(v: unknown) {
 const HISTORY_KEY = "bgpExplorer.history.v1";
 const HISTORY_MAX = 12;
 const get = getPath;
+const EXAMPLES = ["8.8.8.8", "8.8.8.0/24", "AS15169", "cloudflare", "google"];
+
+type BgpClientProps = {
+  presetQuery?: string;
+  lockQuery?: boolean;
+  pageTitle?: string;
+  pageDescription?: string;
+};
 
 function formatAge(ms: number | undefined) {
   if (!ms || !Number.isFinite(ms) || ms < 0) return "";
@@ -93,13 +101,30 @@ function safeFilename(s: string): string {
     .slice(0, 120);
 }
 
-export default function BgpClient() {
+function asnEntityHref(asn: string): string {
+  const clean = asn.trim().replace(/^AS\s*/i, "");
+  return `/asn/${encodeURIComponent(clean)}`;
+}
+
+function prefixEntityHref(prefix: string): string | null {
+  const [addr, mask] = prefix.trim().split("/", 2);
+  if (!addr || !mask) return null;
+  return `/prefix/${encodeURIComponent(addr)}/${encodeURIComponent(mask)}`;
+}
+
+export default function BgpClient({
+  presetQuery,
+  lockQuery = false,
+  pageTitle = "BGP Explorer",
+  pageDescription = "Search an IP, prefix (CIDR), ASN, or org name. Results are timestamped and include upstream evidence links when available.",
+}: BgpClientProps = {}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
   const qParam = (searchParams.get("q") ?? "").trim();
-  const [q, setQ] = useState(qParam || "8.8.8.8");
+  const initialQ = ((presetQuery ?? qParam) || "8.8.8.8").trim() || "8.8.8.8";
+  const [q, setQ] = useState(initialQ);
   const [data, setData] = useState<LookupResponse | null>(null);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
@@ -112,131 +137,160 @@ export default function BgpClient() {
     setHistory(loadHistory());
   }, []);
 
-  const run = async (nextQ?: string) => {
-    const query = (nextQ ?? q).trim();
-    if (!query) return;
+  const run = useCallback(
+    async (nextQ?: string) => {
+      const query = (nextQ ?? (lockQuery ? presetQuery ?? q : q)).trim();
+      if (!query) return;
 
-    setLoading(true);
-    setErr("");
-    setData(null);
-    try {
-      const res = await fetch(`/api/bgp/lookup?q=${encodeURIComponent(query)}`, { cache: "no-store" });
-      const json = (await res.json()) as LookupResponse;
-      if (!res.ok) {
-        const base = (json["error"] as string) || `HTTP ${res.status}`;
-        const retryAfter = Number(get(json, ["rateLimit", "retryAfterSec"]) ?? NaN);
-        if (Number.isFinite(retryAfter) && retryAfter > 0) {
-          throw new Error(`${base}. Retry in ~${Math.ceil(retryAfter)}s.`);
+      setLoading(true);
+      setErr("");
+      setData(null);
+      try {
+        const res = await fetch(`/api/bgp/lookup?q=${encodeURIComponent(query)}`, { cache: "no-store" });
+        const json = (await res.json()) as LookupResponse;
+        if (!res.ok) {
+          const base = (json["error"] as string) || `HTTP ${res.status}`;
+          const retryAfter = Number(get(json, ["rateLimit", "retryAfterSec"]) ?? NaN);
+          if (Number.isFinite(retryAfter) && retryAfter > 0) {
+            throw new Error(`${base}. Retry in ~${Math.ceil(retryAfter)}s.`);
+          }
+          throw new Error(base);
         }
-        throw new Error(base);
-      }
-      setData(json);
-      const sp = new URLSearchParams(searchParams.toString());
-      sp.set("q", query);
-      router.replace(`${pathname}?${sp.toString()}`, { scroll: false });
+        setData(json);
+        if (!lockQuery) {
+          const sp = new URLSearchParams(searchParams.toString());
+          sp.set("q", query);
+          router.replace(`${pathname}?${sp.toString()}`, { scroll: false });
+        }
 
-      setHistory((prev) => {
-        const next = addToHistory(prev, query);
-        saveHistory(next);
-        return next;
-      });
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  };
+        setHistory((prev) => {
+          const next = addToHistory(prev, query);
+          saveHistory(next);
+          return next;
+        });
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : String(e));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [lockQuery, pathname, presetQuery, q, router, searchParams],
+  );
 
   useEffect(() => {
     if (didAutoRun.current) return;
+    if (lockQuery) {
+      if (!presetQuery?.trim()) return;
+      didAutoRun.current = true;
+      setQ(presetQuery);
+      void run(presetQuery);
+      return;
+    }
     if (!qParam) return;
     didAutoRun.current = true;
     setQ(qParam);
     void run(qParam);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qParam]);
+  }, [lockQuery, presetQuery, qParam, run]);
 
   const summary = useMemo(() => summarizeLookup(data), [data]);
   const structuredView = useMemo(() => extractStructuredView(data), [data]);
   const suggestions = useMemo(() => extractSuggestions(data), [data]);
-  const examples = useMemo(() => ["8.8.8.8", "8.8.8.0/24", "AS15169", "cloudflare", "google"], []);
 
   return (
     <div className="grid gap-6">
       <header className="grid gap-2">
-        <h1 className="text-2xl font-semibold tracking-tight text-white">BGP Explorer</h1>
-        <p className="max-w-3xl text-sm leading-6 text-white/65">
-          Search an IP, prefix (CIDR), ASN, or org name. Results are timestamped and include upstream evidence
-          links when available.
-        </p>
+        <h1 className="text-2xl font-semibold tracking-tight text-white">{pageTitle}</h1>
+        <p className="max-w-3xl text-sm leading-6 text-white/65">{pageDescription}</p>
+        {lockQuery ? (
+          <div className="text-xs text-white/55">
+            Canonical entity route. Use <span className="font-mono">/bgp</span> for free-form lookups.
+          </div>
+        ) : null}
       </header>
 
       <section className="rounded-2xl border border-white/10 bg-white/5 p-5 ring-1 ring-white/10">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center">
-          <input
-            className="w-full rounded-xl border border-white/15 bg-black/20 px-4 py-3 text-sm text-white/90 outline-none placeholder:text-white/35 focus:border-sky-300/40"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void run();
-            }}
-            placeholder="8.8.8.8 | 8.8.8.0/24 | 15169 | google"
-          />
-          <button
-            className="shrink-0 rounded-xl bg-sky-400/20 px-4 py-3 text-sm font-semibold text-sky-100 ring-1 ring-sky-300/30 hover:bg-sky-400/25 disabled:opacity-50"
-            onClick={() => void run()}
-            disabled={loading || !q.trim()}
-          >
-            {loading ? "Searching…" : "Lookup"}
-          </button>
-        </div>
+        {lockQuery ? (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="font-mono text-sm text-white/85">{presetQuery}</div>
+            <button
+              className="shrink-0 rounded-xl bg-sky-400/20 px-4 py-3 text-sm font-semibold text-sky-100 ring-1 ring-sky-300/30 hover:bg-sky-400/25 disabled:opacity-50"
+              onClick={() => void run()}
+              disabled={loading || !(presetQuery ?? "").trim()}
+            >
+              {loading ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3 md:flex-row md:items-center">
+            <input
+              className="w-full rounded-xl border border-white/15 bg-black/20 px-4 py-3 text-sm text-white/90 outline-none placeholder:text-white/35 focus:border-sky-300/40"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void run();
+              }}
+              placeholder="8.8.8.8 | 8.8.8.0/24 | 15169 | google"
+            />
+            <button
+              className="shrink-0 rounded-xl bg-sky-400/20 px-4 py-3 text-sm font-semibold text-sky-100 ring-1 ring-sky-300/30 hover:bg-sky-400/25 disabled:opacity-50"
+              onClick={() => void run()}
+              disabled={loading || !q.trim()}
+            >
+              {loading ? "Searching…" : "Lookup"}
+            </button>
+          </div>
+        )}
         {err ? (
           <div className="mt-3 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">
             {err}
           </div>
         ) : null}
 
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-white/60">
-          <div className="mr-1">Examples:</div>
-          {examples.map((ex) => (
-            <button
-              key={ex}
-              className="rounded-full bg-white/8 px-3 py-1 font-mono text-[11px] text-white/75 ring-1 ring-white/10 hover:bg-white/12"
-              onClick={() => {
-                setQ(ex);
-                void run(ex);
-              }}
-            >
-              {ex}
-            </button>
-          ))}
-        </div>
+        {!lockQuery ? (
+          <>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-white/60">
+              <div className="mr-1">Examples:</div>
+              {EXAMPLES.map((ex) => (
+                <button
+                  key={ex}
+                  className="rounded-full bg-white/8 px-3 py-1 font-mono text-[11px] text-white/75 ring-1 ring-white/10 hover:bg-white/12"
+                  onClick={() => {
+                    setQ(ex);
+                    void run(ex);
+                  }}
+                >
+                  {ex}
+                </button>
+              ))}
+            </div>
 
-        {history.length ? (
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-white/60">
-            <div className="mr-1">Recent:</div>
-            {history.map((h) => (
-              <button
-                key={h}
-                className="rounded-full bg-black/25 px-3 py-1 font-mono text-[11px] text-white/70 ring-1 ring-white/10 hover:bg-black/30"
-                onClick={() => {
-                  setQ(h);
-                  void run(h);
-                }}
-              >
-                {h}
-              </button>
-            ))}
-            <button
-              className="rounded-full bg-white/5 px-3 py-1 text-[11px] text-white/60 ring-1 ring-white/10 hover:bg-white/8"
-              onClick={() => {
-                saveHistory([]);
-                setHistory([]);
-              }}
-            >
-              Clear
-            </button>
-          </div>
+            {history.length ? (
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-white/60">
+                <div className="mr-1">Recent:</div>
+                {history.map((h) => (
+                  <button
+                    key={h}
+                    className="rounded-full bg-black/25 px-3 py-1 font-mono text-[11px] text-white/70 ring-1 ring-white/10 hover:bg-black/30"
+                    onClick={() => {
+                      setQ(h);
+                      void run(h);
+                    }}
+                  >
+                    {h}
+                  </button>
+                ))}
+                <button
+                  className="rounded-full bg-white/5 px-3 py-1 text-[11px] text-white/60 ring-1 ring-white/10 hover:bg-white/8"
+                  onClick={() => {
+                    saveHistory([]);
+                    setHistory([]);
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+            ) : null}
+          </>
         ) : null}
       </section>
 
@@ -278,7 +332,16 @@ export default function BgpClient() {
                 <div className="text-white/60">No upstream evidence recorded.</div>
               )}
               <div className="text-xs text-white/55">
-                Tip: share this lookup by copying the page URL (it includes <span className="font-mono">?q=</span>).
+                {lockQuery ? (
+                  <>
+                    Tip: this page is a canonical entity permalink. Share this route directly.
+                  </>
+                ) : (
+                  <>
+                    Tip: share this lookup by copying the page URL (it includes <span className="font-mono">?q=</span>
+                    ).
+                  </>
+                )}
               </div>
             </div>
           </Panel>
@@ -414,6 +477,14 @@ function summarizeLookup(data: LookupResponse | null) {
   if (Number.isFinite(rateRemaining) && Number.isFinite(rateLimit)) {
     items.push({ k: "rate_limit_remaining", v: `${rateRemaining}/${rateLimit}` });
   }
+  const requestId = String(get(data, ["meta", "requestId"]) ?? "").trim();
+  if (requestId) items.push({ k: "request_id", v: requestId });
+  const durationMs = Number(get(data, ["meta", "durationMs"]) ?? NaN);
+  if (Number.isFinite(durationMs) && durationMs >= 0) items.push({ k: "duration_ms", v: String(durationMs) });
+  const cacheHits = Number(get(data, ["meta", "cacheHits"]) ?? NaN);
+  if (Number.isFinite(cacheHits)) items.push({ k: "cache_hits", v: String(cacheHits) });
+  const upstreamErrors = Number(get(data, ["meta", "upstreamErrors"]) ?? NaN);
+  if (Number.isFinite(upstreamErrors)) items.push({ k: "upstream_errors", v: String(upstreamErrors) });
 
   const d = data["data"];
 
@@ -484,12 +555,22 @@ function StructuredViewPanel({
         <div className="font-mono text-xs text-white/65">IP: {view.ip}</div>
         <div className="flex flex-wrap items-center gap-2">
           {view.coveringPrefix ? (
-            <button
-              className="rounded-full bg-sky-400/20 px-3 py-1 font-mono text-xs text-sky-100 ring-1 ring-sky-300/30 hover:bg-sky-400/25"
-              onClick={() => onLookup(view.coveringPrefix)}
-            >
-              Prefix: {view.coveringPrefix}
-            </button>
+            <>
+              <button
+                className="rounded-full bg-sky-400/20 px-3 py-1 font-mono text-xs text-sky-100 ring-1 ring-sky-300/30 hover:bg-sky-400/25"
+                onClick={() => onLookup(view.coveringPrefix)}
+              >
+                Prefix: {view.coveringPrefix}
+              </button>
+              {prefixEntityHref(view.coveringPrefix) ? (
+                <a
+                  href={prefixEntityHref(view.coveringPrefix) ?? "#"}
+                  className="rounded-full bg-white/10 px-3 py-1 font-mono text-xs text-white/80 ring-1 ring-white/10 hover:bg-white/15"
+                >
+                  Open prefix page
+                </a>
+              ) : null}
+            </>
           ) : (
             <div className="text-white/55">No covering prefix found.</div>
           )}
@@ -497,13 +578,20 @@ function StructuredViewPanel({
         <div className="flex flex-wrap items-center gap-2">
           {view.asns.length ? (
             view.asns.map((asn) => (
-              <button
-                key={asn}
-                className="rounded-full bg-white/10 px-3 py-1 font-mono text-xs text-white/80 ring-1 ring-white/10 hover:bg-white/15"
-                onClick={() => onLookup(`AS${asn}`)}
-              >
-                AS{asn}
-              </button>
+              <span key={asn} className="inline-flex items-center gap-2">
+                <button
+                  className="rounded-full bg-white/10 px-3 py-1 font-mono text-xs text-white/80 ring-1 ring-white/10 hover:bg-white/15"
+                  onClick={() => onLookup(`AS${asn}`)}
+                >
+                  AS{asn}
+                </button>
+                <a
+                  href={asnEntityHref(asn)}
+                  className="rounded-full bg-black/30 px-2 py-1 font-mono text-[11px] text-white/70 ring-1 ring-white/10 hover:bg-black/35"
+                >
+                  page
+                </a>
+              </span>
             ))
           ) : (
             <div className="text-white/55">No origin ASN suggestions returned.</div>
@@ -526,12 +614,20 @@ function StructuredViewPanel({
 
         <div className="flex flex-wrap gap-2">
           {view.originAsn ? (
-            <button
-              className="rounded-full bg-white/10 px-3 py-1 font-mono text-xs text-white/80 ring-1 ring-white/10 hover:bg-white/15"
-              onClick={() => onLookup(`AS${view.originAsn}`)}
-            >
-              Pivot to AS{view.originAsn}
-            </button>
+            <>
+              <button
+                className="rounded-full bg-white/10 px-3 py-1 font-mono text-xs text-white/80 ring-1 ring-white/10 hover:bg-white/15"
+                onClick={() => onLookup(`AS${view.originAsn}`)}
+              >
+                Pivot to AS{view.originAsn}
+              </button>
+              <a
+                href={asnEntityHref(view.originAsn)}
+                className="rounded-full bg-black/30 px-3 py-1 font-mono text-xs text-white/70 ring-1 ring-white/10 hover:bg-black/35"
+              >
+                Open AS page
+              </a>
+            </>
           ) : null}
           <button
             className="rounded-full bg-white/10 px-3 py-1 font-mono text-xs text-white/80 ring-1 ring-white/10 hover:bg-white/15"
@@ -539,6 +635,14 @@ function StructuredViewPanel({
           >
             Refresh prefix lookup
           </button>
+          {prefixEntityHref(view.prefix) ? (
+            <a
+              href={prefixEntityHref(view.prefix) ?? "#"}
+              className="rounded-full bg-black/30 px-3 py-1 font-mono text-xs text-white/70 ring-1 ring-white/10 hover:bg-black/35"
+            >
+              Open prefix page
+            </a>
+          ) : null}
         </div>
 
         {view.peers.length ? (
@@ -592,6 +696,12 @@ function StructuredViewPanel({
         >
           Refresh AS{view.asn}
         </button>
+        <a
+          href={asnEntityHref(view.asn)}
+          className="rounded-full bg-black/30 px-3 py-1 font-mono text-xs text-white/70 ring-1 ring-white/10 hover:bg-black/35"
+        >
+          Open AS page
+        </a>
       </div>
       {view.prefixSample.length ? (
         <div className="flex flex-wrap gap-2">

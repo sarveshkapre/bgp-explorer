@@ -19,6 +19,7 @@ Open `http://localhost:3000/bgp` (or `/` which redirects) and try:
 
 The UI keeps a small local query history and can copy/download the raw JSON evidence.
 Structured cards surface origin ASN, RPKI state, top peers/paths, and prefix samples with one-click pivot lookups.
+Canonical entity routes are available at `/asn/:asn` and `/prefix/:addr/:mask` (example: `/asn/15169`, `/prefix/8.8.8.0/24`).
 
 ## Data sources
 - RouteViews API (prefix + ASN lookups, including RPKI state where available)
@@ -31,6 +32,10 @@ API abuse guardrails (best effort, in-memory):
 - `BGP_RATE_LIMIT_MAX_REQUESTS` (default `40`)
 - `BGP_RATE_LIMIT_WINDOW_MS` (default `10000`)
 - `BGP_RATE_LIMIT_MAX_KEYS` (default `2000`)
+
+Observability metadata:
+- `/api/bgp/lookup` responses include `meta.requestId`, `meta.durationMs`, `meta.cacheHits`, and `meta.upstreamErrors`.
+- Response headers include `X-Request-Id` and `X-Response-Time-Ms`.
 
 ## Checks
 ```bash
