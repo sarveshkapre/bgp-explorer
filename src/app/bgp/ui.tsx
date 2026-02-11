@@ -6,6 +6,40 @@ import { asRecord, getPath } from "@/lib/json";
 import { routeViewsOriginAsn, routeViewsReportingPeersCount, routeViewsRPKIState } from "@/lib/routeViews";
 
 type LookupResponse = Record<string, unknown>;
+type SummaryItem = { k: string; v: string };
+type SummarySource = {
+  name: string;
+  url: string;
+  fetchedAt: string;
+  status: number;
+  ok: boolean;
+  upstreamTime?: string;
+  cached: boolean;
+  cacheAgeMs: number;
+};
+
+type StructuredView =
+  | {
+      kind: "ip";
+      ip: string;
+      coveringPrefix: string;
+      asns: string[];
+    }
+  | {
+      kind: "prefix";
+      prefix: string;
+      rpki: string;
+      originAsn: string;
+      reportingPeers: number;
+      uniqueAsPaths: number;
+      peers: Array<{ peerAsn: string; collector: string; asPath: string; timestamp: string }>;
+    }
+  | {
+      kind: "asn";
+      asn: string;
+      prefixCount: number;
+      prefixSample: string[];
+    };
 
 function prettyJson(v: unknown) {
   try {
@@ -89,7 +123,12 @@ export default function BgpClient() {
       const res = await fetch(`/api/bgp/lookup?q=${encodeURIComponent(query)}`, { cache: "no-store" });
       const json = (await res.json()) as LookupResponse;
       if (!res.ok) {
-        throw new Error((json["error"] as string) || `HTTP ${res.status}`);
+        const base = (json["error"] as string) || `HTTP ${res.status}`;
+        const retryAfter = Number(get(json, ["rateLimit", "retryAfterSec"]) ?? NaN);
+        if (Number.isFinite(retryAfter) && retryAfter > 0) {
+          throw new Error(`${base}. Retry in ~${Math.ceil(retryAfter)}s.`);
+        }
+        throw new Error(base);
       }
       setData(json);
       const sp = new URLSearchParams(searchParams.toString());
@@ -118,6 +157,7 @@ export default function BgpClient() {
   }, [qParam]);
 
   const summary = useMemo(() => summarizeLookup(data), [data]);
+  const structuredView = useMemo(() => extractStructuredView(data), [data]);
   const suggestions = useMemo(() => extractSuggestions(data), [data]);
   const examples = useMemo(() => ["8.8.8.8", "8.8.8.0/24", "AS15169", "cloudflare", "google"], []);
 
@@ -245,6 +285,18 @@ export default function BgpClient() {
         </section>
       ) : null}
 
+      {structuredView ? (
+        <Panel title="Structured View">
+          <StructuredViewPanel
+            view={structuredView}
+            onLookup={(next) => {
+              setQ(next);
+              void run(next);
+            }}
+          />
+        </Panel>
+      ) : null}
+
       {suggestions.length ? (
         <Panel title="Suggestions">
           <div className="grid gap-2">
@@ -352,11 +404,16 @@ function summarizeLookup(data: LookupResponse | null) {
   const fetchedAt = String(data["fetchedAt"] ?? "");
   const partial = Boolean(data["partial"] ?? false);
 
-  const items: Array<{ k: string; v: string }> = [
+  const items: SummaryItem[] = [
     { k: "kind", v: kind || "-" },
     { k: "fetchedAt", v: fetchedAt || "-" },
     { k: "partial", v: partial ? "true" : "false" },
   ];
+  const rateRemaining = Number(get(data, ["rateLimit", "remaining"]) ?? NaN);
+  const rateLimit = Number(get(data, ["rateLimit", "limit"]) ?? NaN);
+  if (Number.isFinite(rateRemaining) && Number.isFinite(rateLimit)) {
+    items.push({ k: "rate_limit_remaining", v: `${rateRemaining}/${rateLimit}` });
+  }
 
   const d = data["data"];
 
@@ -395,7 +452,7 @@ function summarizeLookup(data: LookupResponse | null) {
   }
 
   const sourcesRaw = data["sources"];
-  const sources = Array.isArray(sourcesRaw)
+  const sources: SummarySource[] = Array.isArray(sourcesRaw)
     ? sourcesRaw
         .map((s) => asRecord(s))
         .filter((s): s is Record<string, unknown> => Boolean(s))
@@ -403,15 +460,227 @@ function summarizeLookup(data: LookupResponse | null) {
           name: String(s["name"] ?? "-"),
           url: String(s["url"] ?? "-"),
           fetchedAt: String(s["fetchedAt"] ?? "-"),
-          status: typeof s["status"] === "number" ? s["status"] : Number(s["status"] ?? NaN),
+          status: Number.isFinite(Number(s["status"])) ? Number(s["status"]) : 0,
           ok: Boolean(s["ok"]),
           upstreamTime: String(s["upstreamTime"] ?? "") || undefined,
           cached: Boolean(s["cached"] ?? false),
-          cacheAgeMs: typeof s["cacheAgeMs"] === "number" ? s["cacheAgeMs"] : Number(s["cacheAgeMs"] ?? NaN),
+          cacheAgeMs: Number.isFinite(Number(s["cacheAgeMs"])) ? Number(s["cacheAgeMs"]) : 0,
         }))
     : [];
 
   return { items, sources };
+}
+
+function StructuredViewPanel({
+  view,
+  onLookup,
+}: {
+  view: StructuredView;
+  onLookup: (query: string) => void;
+}) {
+  if (view.kind === "ip") {
+    return (
+      <div className="grid gap-3 text-sm text-white/75">
+        <div className="font-mono text-xs text-white/65">IP: {view.ip}</div>
+        <div className="flex flex-wrap items-center gap-2">
+          {view.coveringPrefix ? (
+            <button
+              className="rounded-full bg-sky-400/20 px-3 py-1 font-mono text-xs text-sky-100 ring-1 ring-sky-300/30 hover:bg-sky-400/25"
+              onClick={() => onLookup(view.coveringPrefix)}
+            >
+              Prefix: {view.coveringPrefix}
+            </button>
+          ) : (
+            <div className="text-white/55">No covering prefix found.</div>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {view.asns.length ? (
+            view.asns.map((asn) => (
+              <button
+                key={asn}
+                className="rounded-full bg-white/10 px-3 py-1 font-mono text-xs text-white/80 ring-1 ring-white/10 hover:bg-white/15"
+                onClick={() => onLookup(`AS${asn}`)}
+              >
+                AS{asn}
+              </button>
+            ))
+          ) : (
+            <div className="text-white/55">No origin ASN suggestions returned.</div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (view.kind === "prefix") {
+    return (
+      <div className="grid gap-4">
+        <div className="grid grid-cols-2 gap-2 text-xs text-white/70 md:grid-cols-5">
+          <Metric k="prefix" v={view.prefix} />
+          <Metric k="rpki" v={view.rpki || "-"} />
+          <Metric k="origin_asn" v={view.originAsn ? `AS${view.originAsn}` : "-"} />
+          <Metric k="reporting_peers" v={String(view.reportingPeers)} />
+          <Metric k="unique_as_paths" v={String(view.uniqueAsPaths)} />
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {view.originAsn ? (
+            <button
+              className="rounded-full bg-white/10 px-3 py-1 font-mono text-xs text-white/80 ring-1 ring-white/10 hover:bg-white/15"
+              onClick={() => onLookup(`AS${view.originAsn}`)}
+            >
+              Pivot to AS{view.originAsn}
+            </button>
+          ) : null}
+          <button
+            className="rounded-full bg-white/10 px-3 py-1 font-mono text-xs text-white/80 ring-1 ring-white/10 hover:bg-white/15"
+            onClick={() => onLookup(view.prefix)}
+          >
+            Refresh prefix lookup
+          </button>
+        </div>
+
+        {view.peers.length ? (
+          <div className="overflow-auto rounded-xl border border-white/10 bg-black/20">
+            <table className="w-full min-w-[720px] text-left text-xs text-white/80">
+              <thead className="border-b border-white/10 text-white/55">
+                <tr>
+                  <th className="px-3 py-2 font-medium">peer_asn</th>
+                  <th className="px-3 py-2 font-medium">collector</th>
+                  <th className="px-3 py-2 font-medium">as_path</th>
+                  <th className="px-3 py-2 font-medium">timestamp</th>
+                </tr>
+              </thead>
+              <tbody>
+                {view.peers.map((peer) => (
+                  <tr key={`${peer.collector}:${peer.peerAsn}:${peer.timestamp}`} className="border-b border-white/5">
+                    <td className="px-3 py-2">
+                      <button
+                        className="font-mono text-sky-200 hover:text-sky-100"
+                        onClick={() => onLookup(`AS${peer.peerAsn}`)}
+                      >
+                        AS{peer.peerAsn}
+                      </button>
+                    </td>
+                    <td className="px-3 py-2 font-mono text-[11px] text-white/70">{peer.collector || "-"}</td>
+                    <td className="px-3 py-2 font-mono text-[11px] text-white/70">{peer.asPath || "-"}</td>
+                    <td className="px-3 py-2 font-mono text-[11px] text-white/70">{peer.timestamp || "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-sm text-white/55">No reporting peer rows were returned for this prefix.</div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid grid-cols-2 gap-2 text-xs text-white/70 md:grid-cols-3">
+        <Metric k="asn" v={`AS${view.asn}`} />
+        <Metric k="prefix_count" v={String(view.prefixCount)} />
+        <Metric k="sampled_prefixes" v={String(view.prefixSample.length)} />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <button
+          className="rounded-full bg-white/10 px-3 py-1 font-mono text-xs text-white/80 ring-1 ring-white/10 hover:bg-white/15"
+          onClick={() => onLookup(`AS${view.asn}`)}
+        >
+          Refresh AS{view.asn}
+        </button>
+      </div>
+      {view.prefixSample.length ? (
+        <div className="flex flex-wrap gap-2">
+          {view.prefixSample.map((prefix) => (
+            <button
+              key={prefix}
+              className="rounded-full bg-sky-400/20 px-3 py-1 font-mono text-xs text-sky-100 ring-1 ring-sky-300/30 hover:bg-sky-400/25"
+              onClick={() => onLookup(prefix)}
+            >
+              {prefix}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="text-sm text-white/55">No prefix sample returned for this ASN.</div>
+      )}
+    </div>
+  );
+}
+
+function Metric({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+      <div className="text-[11px] uppercase tracking-wide text-white/50">{k}</div>
+      <div className="mt-1 truncate font-mono text-[11px] text-white/85">{v}</div>
+    </div>
+  );
+}
+
+function extractStructuredView(data: LookupResponse | null): StructuredView | null {
+  if (!data) return null;
+  const kind = String(data["kind"] ?? "");
+
+  if (kind === "ip") {
+    const ip = String(get(data, ["data", "ip"]) ?? "");
+    const coveringPrefix = String(get(data, ["data", "coveringPrefix"]) ?? "");
+    const asnsRaw = get(data, ["data", "asns"]);
+    const asns = Array.isArray(asnsRaw) ? asnsRaw.map(String).filter(Boolean).slice(0, 12) : [];
+    if (!ip) return null;
+    return { kind: "ip", ip, coveringPrefix, asns };
+  }
+
+  if (kind === "prefix") {
+    const prefix = String(get(data, ["data", "prefix"]) ?? "");
+    const prefixInfo = get(data, ["data", "prefixInfo"]);
+    const first = Array.isArray(prefixInfo) ? asRecord(prefixInfo[0]) : null;
+    const peerRaw = first?.["reporting_peers"];
+    const peers = Array.isArray(peerRaw)
+      ? peerRaw
+          .map((peer) => asRecord(peer))
+          .filter((peer): peer is Record<string, unknown> => Boolean(peer))
+          .map((peer) => ({
+            peerAsn: String(peer["peer_asn"] ?? "").trim(),
+            collector: String(peer["collector"] ?? "").trim(),
+            asPath: String(peer["as_path"] ?? "").trim(),
+            timestamp: String(peer["timestamp"] ?? "").trim(),
+          }))
+          .filter((peer) => peer.peerAsn)
+          .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+          .slice(0, 12)
+      : [];
+    const uniqueAsPaths = new Set(peers.map((peer) => peer.asPath).filter(Boolean)).size;
+    if (!prefix) return null;
+    return {
+      kind: "prefix",
+      prefix,
+      rpki: routeViewsRPKIState(prefixInfo) ?? "",
+      originAsn: routeViewsOriginAsn(prefixInfo) ?? "",
+      reportingPeers: routeViewsReportingPeersCount(prefixInfo) ?? peers.length,
+      uniqueAsPaths,
+      peers,
+    };
+  }
+
+  if (kind === "asn") {
+    const asn = String(get(data, ["data", "asn"]) ?? "");
+    if (!asn) return null;
+    const prefixCount = Number(get(data, ["data", "prefixCount"]) ?? 0);
+    const sampleRaw = get(data, ["data", "prefixSample"]);
+    const prefixSample = Array.isArray(sampleRaw) ? sampleRaw.map(String).filter(Boolean).slice(0, 24) : [];
+    return {
+      kind: "asn",
+      asn,
+      prefixCount: Number.isFinite(prefixCount) ? prefixCount : prefixSample.length,
+      prefixSample,
+    };
+  }
+
+  return null;
 }
 
 function extractSuggestions(data: LookupResponse | null) {
