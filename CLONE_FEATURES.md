@@ -10,18 +10,24 @@
 
 Scoring lens: impact, effort, strategic fit, differentiation, risk, confidence.
 
-- [ ] Add entity pages (`/asn/:asn`, `/prefix/:prefix`) with richer relationship views and evidence timelines. (impact: high, effort: high, fit: high, diff: medium, risk: medium, confidence: medium)
 - [ ] Add evidence capture to local storage/db (keyed by query+timestamp) and an evidence permalink route. (impact: high, effort: high, fit: high, diff: high, risk: medium, confidence: low)
 - [ ] Add time-travel diff UI between two snapshots (origin change, peer churn, RPKI changes). (impact: high, effort: high, fit: high, diff: high, risk: medium, confidence: low)
 - [ ] Add optional WHOIS/RDAP enrichment panel for ASN and prefix ownership context. (impact: medium, effort: medium, fit: medium, diff: medium, risk: medium, confidence: medium)
 - [ ] Add PeeringDB enrichment for ASNs (IX presence, facilities, org metadata). (impact: medium, effort: medium, fit: medium, diff: medium, risk: medium, confidence: low)
 - [ ] Add resilient fallback providers for prefix/asn lookups when RouteViews is degraded. (impact: high, effort: high, fit: high, diff: medium, risk: medium, confidence: low)
-- [ ] Add request observability hooks (request id, latency buckets, upstream error counters). (impact: medium, effort: medium, fit: high, diff: low, risk: low, confidence: medium)
-- [ ] Add API contract tests for `/api/bgp/lookup` response shape across IP/prefix/ASN/search modes. (impact: medium, effort: medium, fit: high, diff: low, risk: low, confidence: medium)
-- [ ] Add a lightweight “compare two queries” view (e.g., two prefixes or two ASNs) for quick operator triage. (impact: medium, effort: high, fit: medium, diff: medium, risk: medium, confidence: low)
+- [ ] Add a lightweight compare view (two prefixes/ASNs) for quick operator triage. (impact: medium, effort: high, fit: medium, diff: medium, risk: medium, confidence: low)
+- [ ] Add pagination/virtualization for large ASN prefix lists in structured view to keep UI responsive on large announcements. (impact: medium, effort: medium, fit: high, diff: medium, risk: low, confidence: medium)
+- [ ] Add a minimal provider health panel showing current RouteViews/RIPEstat success rates from in-memory counters. (impact: medium, effort: medium, fit: high, diff: medium, risk: low, confidence: medium)
+- [ ] Add snapshot export manifests (JSON + metadata checksum) for stronger evidence provenance. (impact: medium, effort: medium, fit: high, diff: high, risk: low, confidence: medium)
+- [ ] Add semantic API schema docs under `docs/api.md` and keep examples aligned with contract tests. (impact: medium, effort: low, fit: high, diff: low, risk: low, confidence: high)
+- [ ] Add accessibility pass for keyboard focus/labels in lookup controls and structured tables. (impact: medium, effort: medium, fit: high, diff: low, risk: low, confidence: medium)
 
 ## Implemented
 
+- 2026-02-11: Add canonical entity routes for ASN and prefix (`/asn/:asn`, `/prefix/:addr/:mask`) backed by the existing lookup UX, plus direct entity pivot links in structured cards. Evidence: `src/app/asn/[asn]/page.tsx`, `src/app/prefix/[addr]/[mask]/page.tsx`, `src/app/bgp/ui.tsx`, smoke `curl -o /tmp/asn-page.html -w '%{http_code}' http://localhost:3036/asn/15169` and `curl -o /tmp/prefix-page.html -w '%{http_code}' http://localhost:3036/prefix/8.8.8.0/24` returned `200/200`. (commit: `a73f3b3`)
+- 2026-02-11: Add API response observability metadata (`meta.requestId`, `meta.durationMs`, `meta.cacheHits`, `meta.upstreamErrors`) and `X-Request-Id` / `X-Response-Time-Ms` headers. Evidence: `src/app/api/bgp/lookup/route.ts`, `src/app/bgp/ui.tsx`, smoke `curl -I http://localhost:3037/api/bgp/lookup?q=8.8.8.8` showed both headers. (commit: `a73f3b3`)
+- 2026-02-11: Add contract tests for `/api/bgp/lookup` across IP/prefix/ASN/search flows and upstream failure handling. Evidence: `src/app/api/bgp/lookup/route.test.ts`, `npm test` (29 tests passed). (commit: `a73f3b3`)
+- 2026-02-11: Remove hook lint suppression in `src/app/bgp/ui.tsx` by stabilizing lookup callback dependencies. Evidence: `src/app/bgp/ui.tsx`, `npm run lint` exit 0. (commit: `a73f3b3`)
 - 2026-02-11: Add best-effort per-IP lookup rate limiting with explicit `429` metadata (`retryAfterSec`, reset window) and `Retry-After` header. Evidence: `src/lib/rateLimit.ts`, `src/app/api/bgp/lookup/route.ts`, smoke `BGP_RATE_LIMIT_MAX_REQUESTS=2` then three calls to `/api/bgp/lookup?q=1.1.1.1` returned `200,200,429`. (commit: `853cf1d`)
 - 2026-02-11: Add bounded, evicting fetch cache controls (`BGP_CACHE_MAX_ENTRIES`) and LRU-style overflow pruning. Evidence: `src/lib/safeFetch.ts`, `src/lib/safeFetch.test.ts`, `npm test` (safe fetch cache tests pass). (commit: `853cf1d`)
 - 2026-02-11: Tighten parsing correctness for strict IP validation (`node:net isIP`) and ASN range checks (0..4294967295), with edge-case tests. Evidence: `src/lib/ip.ts`, `src/lib/ip.test.ts`, `src/lib/bgpQuery.ts`, `src/lib/bgpQuery.test.ts`. (commit: `853cf1d`)
@@ -43,15 +49,16 @@ Market scan (bounded, 2026-02-11) sources and baseline expectations:
 
 - `bgp.tools`: emphasizes API-backed, search-centric workflows and richer detail pages (note: blocks generic/bot user agents unless a descriptive agent is provided). https://bgp.tools/ ; docs: https://bgp.tools/kb/api
 - `bgp.he.net`: established ASN/prefix entity pages with relationship-heavy navigation patterns. https://bgp.he.net/
+- `Cloudflare Radar` routing view highlights operator expectations for topology and route-change visual context over time. https://radar.cloudflare.com/routing
 - RouteViews API documentation exposes prefix/ASN and adjacent route metadata endpoints suitable for evidence-oriented UI. https://api.routeviews.org/docs
 - RIPEstat `network-info` endpoint documents IP to covering-prefix/ASN mapping and response fields. https://stat.ripe.net/docs/data-api/api-endpoints/network-info
 - RIPEstat `searchcomplete` endpoint supports disambiguation suggestions for org-like input. https://stat.ripe.net/docs/data-api/api-endpoints/searchcomplete
 
 Gap map (as of 2026-02-11):
-- Missing: dedicated entity pages (ASN/prefix), evidence permalinks/snapshots, time-travel/diff, anomaly detection, richer enrichment (PeeringDB/WHOIS/RDAP).
-- Weak: deeper disambiguation for org searches, fallback data-provider strategy, request-level observability.
-- Parity: single search box, actionable suggestions, raw JSON access, upstream evidence URLs/timestamps.
-- Differentiator opportunities: first-class evidence capture (permalinks + export), “changes over time” UX once snapshots exist.
+- Missing: evidence permalinks/snapshots, time-travel/diff, anomaly detection, richer enrichment (PeeringDB/WHOIS/RDAP).
+- Weak: deeper disambiguation for org searches, fallback data-provider strategy, timeline-oriented visualizations.
+- Parity: canonical entity routes (ASN/prefix), single search box, actionable suggestions, raw JSON access, upstream evidence URLs/timestamps, basic request observability.
+- Differentiator opportunities: first-class evidence capture (permalinks + export), route-change timeline UX once snapshots exist.
 
 ## Notes
 - This file is maintained by the autonomous clone loop.

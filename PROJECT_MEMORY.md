@@ -15,12 +15,15 @@
 ## Open Problems
 
 - No persisted “evidence permalink” (results are live fetches only).
-- No entity pages for ASNs/prefixes beyond the single lookup view.
 - No “time travel” or stored snapshot diffing yet.
 
 ## Recent Decisions
 - Template: YYYY-MM-DD | Decision | Why | Evidence (tests/logs) | Commit | Confidence (high/medium/low) | Trust (trusted/untrusted)
 
+- 2026-02-11 | Add canonical entity routes for ASN and prefix with locked-query lookup views | Improve shareability and operator navigation by giving ASNs/prefixes stable URLs while preserving existing evidence UI | Local smoke: `/asn/15169` and `/prefix/8.8.8.0/24` returned HTTP 200 and rendered canonical headers | a73f3b3 | high | trusted
+- 2026-02-11 | Add request-level observability metadata and response headers for `/api/bgp/lookup` | Make request tracing and latency/debug signals explicit in API and UI without external observability infra | `curl -I /api/bgp/lookup?q=8.8.8.8` showed `x-request-id` + `x-response-time-ms`; `meta` surfaced in JSON and summary panel | a73f3b3 | high | trusted
+- 2026-02-11 | Add API contract tests for lookup modes and upstream failure | Prevent response-shape drift as features evolve and lock key behavior for IP/prefix/ASN/search flows | `src/app/api/bgp/lookup/route.test.ts` added; `npm test` reported 29 passing tests | a73f3b3 | high | trusted
+- 2026-02-11 | Expand bounded market scan inputs with topology/time-series baseline UX from Cloudflare Radar routing | Calibrate roadmap toward timeline and route-change visual expectations while treating external claims as untrusted signals | `https://radar.cloudflare.com/routing`, `https://bgp.he.net/`, `https://bgp.tools/` | n/a | medium | untrusted
 - 2026-02-11 | Add best-effort in-memory per-IP rate limiting for `/api/bgp/lookup` and return explicit `429` metadata | Prevent accidental upstream overload and make throttling behavior observable to users | Local smoke with `BGP_RATE_LIMIT_MAX_REQUESTS=2`: three API calls returned `200, 200, 429` and `retryAfterSec` | 853cf1d | high | trusted
 - 2026-02-11 | Add bounded fetch cache (`BGP_CACHE_MAX_ENTRIES`) with stale + LRU-style eviction | Prevent unbounded memory growth while preserving short TTL cache benefits | `npm test` includes `src/lib/safeFetch.test.ts` validating cache hit and eviction behavior | 853cf1d | high | trusted
 - 2026-02-11 | Tighten parser correctness (strict `isIP` validation and ASN range bound) | Avoid false-positive IP parsing and invalid ASN lookups | `src/lib/ip.test.ts` and `src/lib/bgpQuery.test.ts` cover `:::` and `AS4294967296` rejection | 853cf1d | high | trusted
@@ -37,6 +40,7 @@
 ## Mistakes And Fixes
 - Template: YYYY-MM-DD | Issue | Root cause | Fix | Prevention rule | Commit | Confidence
 
+- 2026-02-11 | `tsc`/build parse failure in `src/app/bgp/ui.tsx` during initial entity-route refactor | Mixed `??` and `||` without explicit grouping in one expression | Wrapped nullish expression in parentheses before fallback OR | During refactors, run `npm run typecheck` before full build and avoid mixing nullish + logical operators without explicit grouping | a73f3b3 | high
 - 2026-02-10 | `next build` failed on `/bgp` due to `useSearchParams()` missing a Suspense boundary | App Router CSR bailout requirement not accounted for | Split `/bgp` into a server `page.tsx` that wraps a client component in `<Suspense>` | Always run `npm run build` after adding `useSearchParams` / `usePathname` and wrap client-only hooks behind a Suspense boundary | c282510 | high
 
 ## Known Risks
@@ -46,11 +50,11 @@
 
 ## Next Prioritized Tasks
 
-- Entity pages (`/asn/:asn`, `/prefix/:prefix`) with richer relationship graphs and evidence blocks.
 - Persisted evidence permalinks (store lookup snapshots keyed by query+timestamp).
 - Time-travel / diff UX once snapshots exist.
-- API contract tests for `/api/bgp/lookup` response shapes across IP/prefix/ASN/search.
-- Fallback provider strategy + request observability (latency/error counters).
+- Fallback provider strategy for prefix/asn lookups when RouteViews is degraded.
+- Timeline-style UX for route-change context (origin/peer churn) informed by snapshots.
+- Expand entity pages with enrichment panels (WHOIS/RDAP, PeeringDB).
 
 ## Verification Evidence
 - Template: YYYY-MM-DD | Command | Key output | Status (pass/fail)
@@ -74,5 +78,12 @@
 - 2026-02-11 | `BGP_RATE_LIMIT_MAX_REQUESTS=50 npm run dev -- --port 3023` + `curl /api/bgp/lookup?q=8.8.8.8|8.8.8.0/24|AS15169` | returned `kind` values `ip/prefix/asn`, prefix and ASN fields present | pass
 - 2026-02-11 | `BGP_RATE_LIMIT_MAX_REQUESTS=2 npm run dev -- --port 3024` + 3x `curl /api/bgp/lookup?q=1.1.1.1` | HTTP sequence `200,200,429`; body included `error=rate limit exceeded` and `retryAfterSec` | pass
 - 2026-02-11 | `gh run watch 21893830124 --exit-status` | CI run for commit `627684e` completed successfully (`lint`, `typecheck`, `test`, `build`) | pass
+- 2026-02-11 | `gh issue list --limit 100 --json number,title,author,state,labels,createdAt,updatedAt,url` | returned `[]` (no open owner/bot issues) | pass
+- 2026-02-11 | `gh run list --limit 20 --json databaseId,displayTitle,headBranch,headSha,status,conclusion,event,createdAt,updatedAt,url` | latest run for `a73f3b3` queued then executed; previous completed runs were `success` | pass
+- 2026-02-11 | `npm run lint && npm run typecheck && npm test && npm run build` | all commands exited 0; vitest 29 tests passed; build emitted `/asn/[asn]` and `/prefix/[addr]/[mask]` routes | pass
+- 2026-02-11 | `npm run dev -- --port 3036` + `curl /api/bgp/lookup?q=8.8.8.8|8.8.8.0/24|AS15169` | live upstream responses returned `kind=ip/prefix/asn`, source evidence URLs, and `meta` fields | pass
+- 2026-02-11 | `npm run dev -- --port 3036` + `curl -o /tmp/asn-page.html -w '%{http_code}' /asn/15169` + `curl -o /tmp/prefix-page.html -w '%{http_code}' /prefix/8.8.8.0/24` | both canonical entity routes returned `200` and rendered route-specific titles/descriptions | pass
+- 2026-02-11 | `npm run dev -- --port 3037` + `curl -I /api/bgp/lookup?q=8.8.8.8` | response headers included `x-request-id` and `x-response-time-ms` | pass
+- 2026-02-11 | `gh run watch 21894030556 --exit-status` | CI run for commit `a73f3b3` completed successfully (`lint`, `typecheck`, `test`, `build`) | pass
 ## Historical Summary
 - Keep compact summaries of older entries here when file compaction runs.
