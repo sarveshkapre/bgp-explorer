@@ -73,5 +73,6 @@
 - 2026-02-11 | `npm run build` | Next.js build succeeded; routes `/`, `/bgp`, `/api/bgp/lookup` emitted | pass
 - 2026-02-11 | `BGP_RATE_LIMIT_MAX_REQUESTS=50 npm run dev -- --port 3023` + `curl /api/bgp/lookup?q=8.8.8.8|8.8.8.0/24|AS15169` | returned `kind` values `ip/prefix/asn`, prefix and ASN fields present | pass
 - 2026-02-11 | `BGP_RATE_LIMIT_MAX_REQUESTS=2 npm run dev -- --port 3024` + 3x `curl /api/bgp/lookup?q=1.1.1.1` | HTTP sequence `200,200,429`; body included `error=rate limit exceeded` and `retryAfterSec` | pass
+- 2026-02-11 | `gh run watch 21893830124 --exit-status` | CI run for commit `627684e` completed successfully (`lint`, `typecheck`, `test`, `build`) | pass
 ## Historical Summary
 - Keep compact summaries of older entries here when file compaction runs.
