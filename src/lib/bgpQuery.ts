@@ -6,7 +6,9 @@ export type BgpQueryKind = "ip" | "prefix" | "asn" | "unknown";
 function normalizeAsn(raw: string): string | null {
   const q = raw.trim().replace(/^AS\s*/i, "");
   if (!/^[0-9]{1,10}$/.test(q)) return null;
-  return q;
+  const n = Number(q);
+  if (!Number.isInteger(n) || n < 0 || n > 4_294_967_295) return null;
+  return String(n);
 }
 
 export function parseBgpQuery(raw: string): { kind: BgpQueryKind; ip?: string; prefix?: string; asn?: string } {
@@ -24,4 +26,3 @@ export function parseBgpQuery(raw: string): { kind: BgpQueryKind; ip?: string; p
 
   return { kind: "unknown" };
 }
-

@@ -21,5 +21,6 @@ describe("normalizeIp", () => {
   it("rejects invalid input", () => {
     expect(normalizeIp("999.1.1.1")).toBeNull();
     expect(normalizeIp("not-an-ip")).toBeNull();
+    expect(normalizeIp(":::")).toBeNull();
   });
 });

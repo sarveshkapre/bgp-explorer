@@ -15,8 +15,13 @@ describe("parseBgpQuery", () => {
     expect(parseBgpQuery("as 15169")).toEqual({ kind: "asn", asn: "15169" });
   });
 
+  it("validates ASN range and canonicalizes leading zeroes", () => {
+    expect(parseBgpQuery("AS4294967295")).toEqual({ kind: "asn", asn: "4294967295" });
+    expect(parseBgpQuery("AS00015169")).toEqual({ kind: "asn", asn: "15169" });
+    expect(parseBgpQuery("4294967296")).toEqual({ kind: "unknown" });
+  });
+
   it("returns unknown for org-like queries", () => {
     expect(parseBgpQuery("google")).toEqual({ kind: "unknown" });
   });
 });
-

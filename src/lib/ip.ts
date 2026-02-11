@@ -1,18 +1,11 @@
+import { isIP } from "node:net";
+
 function isIPv4(input: string): boolean {
-  const parts = input.split(".");
-  if (parts.length !== 4) return false;
-  for (const p of parts) {
-    if (!/^\d+$/.test(p)) return false;
-    const n = Number(p);
-    if (n < 0 || n > 255) return false;
-  }
-  return true;
+  return isIP(input) === 4;
 }
 
 function isIPv6(input: string): boolean {
-  // Minimal check: allow hex, colons, and IPv4-mapped suffix.
-  if (!/^[0-9a-fA-F:.]+$/.test(input)) return false;
-  return input.includes(":");
+  return isIP(input) === 6;
 }
 
 export function normalizeIp(input: string | null | undefined): string | null {

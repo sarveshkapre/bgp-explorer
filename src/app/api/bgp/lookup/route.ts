@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { parseBgpQuery } from "@/lib/bgpQuery";
 import { getPath } from "@/lib/json";
+import { normalizeIp } from "@/lib/ip";
+import { consumeRateLimit } from "@/lib/rateLimit";
 import { routeViewsLatestPeerTimestamp } from "@/lib/routeViews";
 import { safeJsonFetch } from "@/lib/safeFetch";
 
@@ -42,16 +44,78 @@ function cacheTtlMs(): number {
   return Math.floor(n);
 }
 
+function cacheMaxEntries(): number {
+  const raw = process.env.BGP_CACHE_MAX_ENTRIES;
+  if (raw === undefined) return 256;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 256;
+  return Math.floor(n);
+}
+
+function rateLimitWindowMs(): number {
+  const raw = process.env.BGP_RATE_LIMIT_WINDOW_MS;
+  if (raw === undefined) return 10_000;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 10_000;
+  return Math.floor(n);
+}
+
+function rateLimitMaxRequests(): number {
+  const raw = process.env.BGP_RATE_LIMIT_MAX_REQUESTS;
+  if (raw === undefined) return 40;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 40;
+  return Math.floor(n);
+}
+
+function rateLimitMaxKeys(): number {
+  const raw = process.env.BGP_RATE_LIMIT_MAX_KEYS;
+  if (raw === undefined) return 2_000;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 2_000;
+  return Math.floor(n);
+}
+
+function clientRateLimitKey(req: NextRequest): string {
+  const forwarded = req.headers.get("x-forwarded-for");
+  const realIp = req.headers.get("x-real-ip");
+  const ip = normalizeIp(forwarded) ?? normalizeIp(realIp) ?? "anon";
+  return `ip:${ip}`;
+}
+
 export async function GET(req: NextRequest) {
+  const startedAt = new Date().toISOString();
+  const rateLimit = consumeRateLimit(clientRateLimitKey(req), {
+    windowMs: rateLimitWindowMs(),
+    maxRequests: rateLimitMaxRequests(),
+    maxKeys: rateLimitMaxKeys(),
+  });
+  if (!rateLimit.allowed) {
+    const headers = new Headers();
+    if (rateLimit.retryAfterSec) {
+      headers.set("Retry-After", String(rateLimit.retryAfterSec));
+    }
+    return Response.json(
+      {
+        error: "rate limit exceeded",
+        hint: "Please retry shortly; lookup requests are rate-limited to protect upstream data providers.",
+        fetchedAt: startedAt,
+        trust: "trusted",
+        rateLimit,
+      },
+      { status: 429, headers },
+    );
+  }
+
   const { searchParams } = new URL(req.url);
   const raw = (searchParams.get("q") ?? "").trim();
   if (!raw) {
-    return Response.json({ error: "missing query parameter q" }, { status: 400 });
+    return Response.json({ error: "missing query parameter q", rateLimit }, { status: 400 });
   }
 
   const sources: SourceEvidence[] = [];
-  const startedAt = new Date().toISOString();
   const ttlMs = cacheTtlMs();
+  const maxEntries = cacheMaxEntries();
 
   const parsed = parseBgpQuery(raw);
   const ip = parsed.kind === "ip" ? parsed.ip ?? null : null;
@@ -59,7 +123,11 @@ export async function GET(req: NextRequest) {
   const asn = parsed.kind === "asn" ? parsed.asn ?? null : null;
 
   if (parsed.kind === "ip" && ip) {
-    const netRes = await safeJsonFetch<JsonRecord>(ripeNetworkInfoUrl(ip), { timeoutMs: 8000, cacheTtlMs: ttlMs });
+    const netRes = await safeJsonFetch<JsonRecord>(ripeNetworkInfoUrl(ip), {
+      timeoutMs: 8000,
+      cacheTtlMs: ttlMs,
+      cacheMaxEntries: maxEntries,
+    });
     sources.push({
       name: "ripestat",
       url: netRes.url,
@@ -78,6 +146,7 @@ export async function GET(req: NextRequest) {
           query: raw,
           fetchedAt: startedAt,
           trust: "untrusted",
+          rateLimit,
           sources,
           error: netRes.error,
         },
@@ -95,6 +164,7 @@ export async function GET(req: NextRequest) {
       const prefRes = await safeJsonFetch<unknown>(routeViewsPrefixUrl(coveringPrefix), {
         timeoutMs: 8000,
         cacheTtlMs: ttlMs,
+        cacheMaxEntries: maxEntries,
       });
       sources.push({
         name: "routeviews",
@@ -121,6 +191,7 @@ export async function GET(req: NextRequest) {
       query: raw,
       fetchedAt: startedAt,
       trust: "untrusted",
+      rateLimit,
       sources,
       partial,
       data: {
@@ -138,7 +209,11 @@ export async function GET(req: NextRequest) {
   }
 
   if (parsed.kind === "prefix" && prefix) {
-    const prefRes = await safeJsonFetch<unknown>(routeViewsPrefixUrl(prefix), { timeoutMs: 8000, cacheTtlMs: ttlMs });
+    const prefRes = await safeJsonFetch<unknown>(routeViewsPrefixUrl(prefix), {
+      timeoutMs: 8000,
+      cacheTtlMs: ttlMs,
+      cacheMaxEntries: maxEntries,
+    });
     sources.push({
       name: "routeviews",
       url: prefRes.url,
@@ -157,6 +232,7 @@ export async function GET(req: NextRequest) {
           query: raw,
           fetchedAt: startedAt,
           trust: "untrusted",
+          rateLimit,
           sources,
           error: prefRes.error,
         },
@@ -169,6 +245,7 @@ export async function GET(req: NextRequest) {
       query: raw,
       fetchedAt: startedAt,
       trust: "untrusted",
+      rateLimit,
       sources,
       data: {
         prefix,
@@ -182,7 +259,11 @@ export async function GET(req: NextRequest) {
   }
 
   if (parsed.kind === "asn" && asn) {
-    const asnRes = await safeJsonFetch<unknown>(routeViewsAsnUrl(asn), { timeoutMs: 8000, cacheTtlMs: ttlMs });
+    const asnRes = await safeJsonFetch<unknown>(routeViewsAsnUrl(asn), {
+      timeoutMs: 8000,
+      cacheTtlMs: ttlMs,
+      cacheMaxEntries: maxEntries,
+    });
     sources.push({
       name: "routeviews",
       url: asnRes.url,
@@ -200,6 +281,7 @@ export async function GET(req: NextRequest) {
           query: raw,
           fetchedAt: startedAt,
           trust: "untrusted",
+          rateLimit,
           sources,
           error: asnRes.error,
         },
@@ -214,6 +296,7 @@ export async function GET(req: NextRequest) {
       query: raw,
       fetchedAt: startedAt,
       trust: "untrusted",
+      rateLimit,
       sources,
       data: {
         asn,
@@ -229,7 +312,11 @@ export async function GET(req: NextRequest) {
   }
 
   // Fallback: try search completion for org-name / ambiguous queries.
-  const searchRes = await safeJsonFetch<JsonRecord>(ripeSearchCompleteUrl(raw), { timeoutMs: 8000, cacheTtlMs: ttlMs });
+  const searchRes = await safeJsonFetch<JsonRecord>(ripeSearchCompleteUrl(raw), {
+    timeoutMs: 8000,
+    cacheTtlMs: ttlMs,
+    cacheMaxEntries: maxEntries,
+  });
   sources.push({
     name: "ripestat",
     url: searchRes.url,
@@ -248,6 +335,7 @@ export async function GET(req: NextRequest) {
         hint: "Try an IP (8.8.8.8), prefix (8.8.8.0/24), ASN (15169), or an org name (google).",
         fetchedAt: startedAt,
         trust: "untrusted",
+        rateLimit,
         sources,
       },
       { status: 400 },
@@ -259,6 +347,7 @@ export async function GET(req: NextRequest) {
     query: raw,
     fetchedAt: startedAt,
     trust: "untrusted",
+    rateLimit,
     sources,
     data: {
       search: searchRes.value,
